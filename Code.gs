@@ -50,6 +50,7 @@ function initializeStep1() {
 function initializeStep2() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   createDashboardSheet(ss);
+  createDepthChartSheet(ss);
   createLineupSuggesterSheet(ss);
   createHowToUseSheet(ss);
 }
@@ -769,6 +770,72 @@ function refreshDashboard() {
 }
 
 // ============================================================
+// DEPTH CHART SHEET
+// ============================================================
+
+function createDepthChartSheet(ss) {
+  let sheet = ss.getSheetByName('Depth Chart');
+  if (sheet) sheet.clear(); else sheet = ss.insertSheet('Depth Chart');
+
+  // Title
+  sheet.getRange('A1').setValue('Depth Chart')
+    .setFontSize(16).setFontWeight('bold');
+  sheet.getRange('A2').setValue('Rank players per position (1st = top choice). Leave blank for unranked.')
+    .setFontColor('#666666').setFontStyle('italic');
+
+  // Header row (row 4): Rank label + position columns
+  const headers = ['Rank'];
+  POSITIONS.forEach(p => headers.push(p));
+  sheet.getRange(4, 1, 1, headers.length).setValues([headers])
+    .setFontWeight('bold')
+    .setBackground('#1a73e8')
+    .setFontColor('white')
+    .setHorizontalAlignment('center');
+
+  // Rank labels (rows 5-16)
+  const rankLabels = [];
+  const ordinals = ['1st','2nd','3rd','4th','5th','6th','7th','8th','9th','10th','11th','12th'];
+  for (let i = 0; i < MAX_PLAYERS; i++) {
+    rankLabels.push([ordinals[i]]);
+  }
+  sheet.getRange(5, 1, MAX_PLAYERS, 1).setValues(rankLabels)
+    .setFontWeight('bold').setHorizontalAlignment('center');
+
+  // Player name dropdowns (populated when roster has names)
+  const players = getRosterNames();
+  if (players.length > 0) {
+    const dropdownRule = SpreadsheetApp.newDataValidation()
+      .requireValueInList(players, true)
+      .setAllowInvalid(false)
+      .build();
+    sheet.getRange(5, 2, MAX_PLAYERS, POSITIONS.length).setDataValidation(dropdownRule);
+  }
+
+  // Formatting
+  sheet.setColumnWidth(1, 60);
+  for (let c = 2; c <= POSITIONS.length + 1; c++) {
+    sheet.setColumnWidth(c, 120);
+  }
+
+  sheet.setFrozenRows(4);
+}
+
+function updateDepthChartDropdowns() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Depth Chart');
+  if (!sheet) return;
+
+  const players = getRosterNames();
+  if (players.length === 0) return;
+
+  const dropdownRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(players, true)
+    .setAllowInvalid(false)
+    .build();
+  sheet.getRange(5, 2, MAX_PLAYERS, POSITIONS.length).setDataValidation(dropdownRule);
+}
+
+// ============================================================
 // LINEUP SUGGESTER SHEET
 // ============================================================
 
@@ -823,6 +890,32 @@ function createLineupSuggesterSheet(ss) {
   const battingHeaders = ['#', 'Player', 'OBP', 'SLG', 'SB'];
   sheet.getRange(battingStartRow + 1, 1, 1, battingHeaders.length).setValues([battingHeaders])
     .setFontWeight('bold').setBackground('#fbbc04').setFontColor('white').setHorizontalAlignment('center');
+}
+
+// ============================================================
+// DEPTH CHART READER
+// ============================================================
+
+function getDepthChart() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName('Depth Chart');
+  if (!sheet) return {};
+
+  const data = sheet.getRange(5, 2, MAX_PLAYERS, POSITIONS.length).getValues();
+  const depthChart = {};
+
+  for (let j = 0; j < POSITIONS.length; j++) {
+    const pos = POSITIONS[j];
+    depthChart[pos] = [];
+    for (let i = 0; i < MAX_PLAYERS; i++) {
+      const name = data[i][j];
+      if (name && name.toString().trim() !== '') {
+        depthChart[pos].push(name.toString().trim());
+      }
+    }
+  }
+
+  return depthChart;
 }
 
 // ============================================================
@@ -913,6 +1006,9 @@ function suggestLineup() {
     }
   }
 
+  // Get depth chart rankings
+  const depthChart = getDepthChart();
+
   // Also track how many total innings sat out historically per player
   const totalSatOut = {};
   if (historySheet) {
@@ -958,7 +1054,7 @@ function suggestLineup() {
     const playing = availablePlayers.filter(p => sittingOut.indexOf(p) < 0);
 
     // Assign positions using a scoring system
-    const assignment = assignPositions(playing, preferences, gamesSinceAtPosition, lineup, inning);
+    const assignment = assignPositions(playing, preferences, gamesSinceAtPosition, lineup, inning, depthChart);
     lineup.push(assignment);
 
     // Update inning counts
@@ -1040,7 +1136,7 @@ function suggestLineup() {
     ui.ButtonSet.OK);
 }
 
-function assignPositions(players, preferences, gamesSinceAtPosition, previousInnings, currentInning) {
+function assignPositions(players, preferences, gamesSinceAtPosition, previousInnings, currentInning, depthChart) {
   // Score each player-position combination
   const numPlayers = players.length;
   const numPositions = POSITIONS.length;
@@ -1063,6 +1159,14 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
         score -= 20; // bonus for preferred
       }
       // Okay = neutral (0)
+
+      // Depth chart: ranked players get a bonus
+      if (depthChart && depthChart[pos]) {
+        const rank = depthChart[pos].indexOf(playerName);
+        if (rank >= 0) {
+          score -= (MAX_PLAYERS - rank) * 3; // 1st = -36, 2nd = -33, ..., 12th = -3
+        }
+      }
 
       // Recency: prioritize positions not played recently
       const gamesSince = (gamesSinceAtPosition[playerName] && gamesSinceAtPosition[playerName][pos]) || 0;
@@ -1155,6 +1259,12 @@ function createHowToUseSheet(ss) {
     ['4. Enter batting stats (below lineup)', 'Fill in AB, hits (1B/2B/3B/HR), BB, SB, and CS for each player'],
     ['5. Save the game', 'Click ⚾ Softball (far right of menu bar) > Save Game (saves both lineup and batting stats)'],
     ['', ''],
+    ['DEPTH CHART', ''],
+    ['1. Go to the Depth Chart sheet', 'Rank players per position (1st = top choice, leave blank for unranked)'],
+    ['2. Fill in rankings', 'Use the dropdowns to select which player is your 1st, 2nd, 3rd choice, etc. at each position'],
+    ['3. How it works', 'Ranked players get a scoring bonus when the Lineup Suggester assigns positions'],
+    ['4. Interaction with preferences', 'Restricted still blocks a player even if ranked 1st. Depth chart fine-tunes choices among Preferred/Okay players'],
+    ['', ''],
     ['USING THE LINEUP SUGGESTER', ''],
     ['1. Go to the Lineup Suggester sheet', 'Check the boxes next to available players'],
     ['2. Set the number of innings', ''],
@@ -1193,7 +1303,7 @@ function createHowToUseSheet(ss) {
   // Bold column A for all rows (step numbers and bullets will be bold)
   sheet.getRange(1, 1, instructions.length, 1).setFontWeight('bold');
   // Section header rows
-  const sectionRows = [3, 8, 13, 20, 28, 35, 41];
+  const sectionRows = [3, 8, 13, 20, 26, 34, 41, 47];
   sectionRows.forEach(row => {
     if (row <= instructions.length) {
       sheet.getRange(row, 1, 1, 2).setFontSize(13).setBackground('#e8f0fe');
@@ -1230,6 +1340,7 @@ function onEdit(e) {
     // Player name was edited - update dropdowns
     updateGameEntryDropdowns();
     updateSuggesterNames();
+    updateDepthChartDropdowns();
   }
 }
 
