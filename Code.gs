@@ -684,19 +684,18 @@ function refreshDashboard() {
 
   // Build stats per player
   const stats = {};
-  const gameNumbers = new Set();
 
   for (let i = 1; i < historyData.length; i++) {
     const gameNum = historyData[i][0];
     const playerName = historyData[i][5];
-    gameNumbers.add(gameNum);
 
     if (!stats[playerName]) {
       stats[playerName] = {
         positionInnings: new Array(POSITIONS.length).fill(0),
         satOutInnings: 0,
         lastGameAtPosition: new Array(POSITIONS.length).fill(0),
-        totalInnings: 0
+        totalInnings: 0,
+        gamesPlayed: new Set()
       };
     }
 
@@ -714,13 +713,12 @@ function refreshDashboard() {
     if (playedThisInning) {
       s.totalInnings++;
     }
+    s.gamesPlayed.add(gameNum);
 
     if (historyData[i][posStartCol + POSITIONS.length] === 1) {
       s.satOutInnings++;
     }
   }
-
-  const totalGames = gameNumbers.size;
 
   // Section 1: Innings at each position (row 6+) - batch write
   const sec1Data = [];
@@ -756,8 +754,16 @@ function refreshDashboard() {
     const row = [name];
     const bgRow = [null];
     if (s) {
+      // Build ordinal map for this player so absent games don't inflate recency
+      const sortedGames = Array.from(s.gamesPlayed).sort((a, b) => a - b);
+      const gameOrdinal = {};
+      sortedGames.forEach((g, idx) => gameOrdinal[g] = idx + 1);
+      const playerTotalGames = sortedGames.length;
+
       for (let j = 0; j < POSITIONS.length; j++) {
-        const gamesSince = s.lastGameAtPosition[j] > 0 ? totalGames - s.lastGameAtPosition[j] : (totalGames > 0 ? totalGames : 0);
+        const lastGame = s.lastGameAtPosition[j];
+        const lastOrd = lastGame > 0 && gameOrdinal[lastGame] ? gameOrdinal[lastGame] : 0;
+        const gamesSince = lastOrd > 0 ? playerTotalGames - lastOrd : (playerTotalGames > 0 ? playerTotalGames : 0);
         row.push(gamesSince);
         if (gamesSince >= 5) bgRow.push('#f4c7c3');
         else if (gamesSince >= 3) bgRow.push('#fce8b2');
@@ -1010,37 +1016,57 @@ function suggestLineup() {
   }
 
   // Get history stats for recency scoring
+  // Uses per-player game counts so absent games don't inflate recency
   const gamesSinceAtPosition = {};
   if (historySheet) {
     const historyData = historySheet.getDataRange().getValues();
-    const gameNumbers = new Set();
-    const lastGameAtPos = {};
 
+    // First pass: collect each player's games in order
+    const playerGameList = {}; // playerName -> sorted array of game numbers
     for (let i = 1; i < historyData.length; i++) {
       const gameNum = historyData[i][0];
       const playerName = historyData[i][5];
-      gameNumbers.add(gameNum);
-
       if (availablePlayers.indexOf(playerName) < 0) continue;
-      if (!lastGameAtPos[playerName]) lastGameAtPos[playerName] = {};
+      if (!playerGameList[playerName]) playerGameList[playerName] = new Set();
+      playerGameList[playerName].add(gameNum);
+    }
+
+    // Build game-number-to-player-ordinal maps
+    const playerGameIndex = {}; // playerName -> { gameNum -> ordinal (1-based) }
+    for (const name of availablePlayers) {
+      if (playerGameList[name]) {
+        const sorted = Array.from(playerGameList[name]).sort((a, b) => a - b);
+        playerGameIndex[name] = {};
+        sorted.forEach((g, idx) => playerGameIndex[name][g] = idx + 1);
+      }
+    }
+
+    // Second pass: find last game ordinal at each position per player
+    const lastOrdinalAtPos = {};
+    for (let i = 1; i < historyData.length; i++) {
+      const gameNum = historyData[i][0];
+      const playerName = historyData[i][5];
+      if (availablePlayers.indexOf(playerName) < 0) continue;
+      if (!lastOrdinalAtPos[playerName]) lastOrdinalAtPos[playerName] = {};
+      const ordinal = playerGameIndex[playerName][gameNum];
 
       for (let j = 0; j < POSITIONS.length; j++) {
         if (historyData[i][6 + j] === 1) {
-          if (!lastGameAtPos[playerName][POSITIONS[j]] || gameNum > lastGameAtPos[playerName][POSITIONS[j]]) {
-            lastGameAtPos[playerName][POSITIONS[j]] = gameNum;
+          if (!lastOrdinalAtPos[playerName][POSITIONS[j]] || ordinal > lastOrdinalAtPos[playerName][POSITIONS[j]]) {
+            lastOrdinalAtPos[playerName][POSITIONS[j]] = ordinal;
           }
         }
       }
     }
 
-    const totalGames = gameNumbers.size;
     for (const name of availablePlayers) {
+      const totalGamesPlayed = playerGameList[name] ? playerGameList[name].size : 0;
       gamesSinceAtPosition[name] = {};
       for (const pos of POSITIONS) {
-        if (lastGameAtPos[name] && lastGameAtPos[name][pos]) {
-          gamesSinceAtPosition[name][pos] = totalGames - lastGameAtPos[name][pos];
+        if (lastOrdinalAtPos[name] && lastOrdinalAtPos[name][pos]) {
+          gamesSinceAtPosition[name][pos] = totalGamesPlayed - lastOrdinalAtPos[name][pos];
         } else {
-          gamesSinceAtPosition[name][pos] = totalGames > 0 ? totalGames + 1 : 1; // never played = high priority
+          gamesSinceAtPosition[name][pos] = totalGamesPlayed > 0 ? totalGamesPlayed + 1 : 1;
         }
       }
     }
