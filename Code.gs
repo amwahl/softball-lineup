@@ -1034,6 +1034,28 @@ function suggestLineup() {
     const sittingOut = [];
 
     if (numSitOut > 0) {
+      // Identify who sat out last inning (for consecutive avoidance)
+      const lastSitOuts = inning > 0 ? sitOuts[inning - 1] : [];
+
+      // Pitcher-aware sit-out: find the next depth-chart pitcher who isn't
+      // currently pitching, so they can warm up for a future transition
+      let nextPitcher = null;
+      if (depthChart && depthChart['P'] && inning > 0) {
+        const currentPitcher = lineup[inning - 1][0];
+        for (const candidate of depthChart['P']) {
+          if (candidate !== currentPitcher && availablePlayers.indexOf(candidate) >= 0) {
+            // This player hasn't pitched yet or has been away from P —
+            // they're the most likely next pitcher
+            const hasLeftP = lineup.some((inn, k) => inn[0] === candidate) &&
+              lineup[inning - 1][0] !== candidate;
+            if (!hasLeftP) {
+              nextPitcher = candidate;
+              break;
+            }
+          }
+        }
+      }
+
       // Sort by: most innings played this game first, then by least historical sat out
       const candidates = availablePlayers.slice().sort((a, b) => {
         // Primary: who has played the most innings this game
@@ -1043,9 +1065,32 @@ function suggestLineup() {
         return (totalSatOut[a] || 0) - (totalSatOut[b] || 0);
       });
 
-      // Avoid same player sitting out consecutive innings if possible
-      for (let s = 0; s < numSitOut && s < candidates.length; s++) {
-        sittingOut.push(candidates[s]);
+      // Pick sit-outs, avoiding consecutive sit-outs when possible
+      const consecutive = [];
+      const nonConsecutive = [];
+      for (const c of candidates) {
+        if (lastSitOuts.indexOf(c) >= 0) {
+          consecutive.push(c);
+        } else {
+          nonConsecutive.push(c);
+        }
+      }
+      // Prefer non-consecutive first, fall back to consecutive
+      const ordered = nonConsecutive.concat(consecutive);
+
+      for (let s = 0; s < numSitOut && s < ordered.length; s++) {
+        sittingOut.push(ordered[s]);
+      }
+
+      // Pitcher-aware: if the next pitcher isn't already sitting out and
+      // there's room to swap them in, replace the last (least priority) sit-out
+      if (nextPitcher && sittingOut.indexOf(nextPitcher) < 0) {
+        // Only swap if the next pitcher isn't the current pitcher
+        const currentPitcher = inning > 0 ? lineup[inning - 1][0] : null;
+        if (nextPitcher !== currentPitcher) {
+          // Replace the last sit-out (lowest priority) with the next pitcher
+          sittingOut[sittingOut.length - 1] = nextPitcher;
+        }
       }
     }
 
@@ -1219,7 +1264,10 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
               }
             }
 
-            if (consecutiveCount >= 2) {
+            // P and C get a much stronger continuity bonus since leaving is permanent
+            if (j === 0 || j === 1) {
+              score -= 50; // P/C: strong incentive to keep pitcher/catcher in place
+            } else if (consecutiveCount >= 2) {
               score -= 15; // 3rd+ consecutive inning: stronger bonus
             } else {
               score -= 10; // 2nd consecutive inning: standard bonus
