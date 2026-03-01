@@ -129,7 +129,7 @@ function createGameEntrySheet(ss) {
   sheet.getRange('B3').setDataValidation(inningsValidation);
 
   // Instructions
-  sheet.getRange('D1').setValue('← Fill in game details, then go to the ⚾ Softball menu (in the menu bar above) > Save Game')
+  sheet.getRange('D1').setValue('← Fill in game details, then click ⚾ Softball (far right of the menu bar, after Help) > Save Game')
     .setFontColor('#666666').setFontStyle('italic');
 
   // Lineup grid header (row 5)
@@ -592,7 +592,7 @@ function createDashboardSheet(ss) {
   // Title
   sheet.getRange('A1').setValue('Season Dashboard')
     .setFontSize(16).setFontWeight('bold');
-  sheet.getRange('A2').setValue('Go to the ⚾ Softball menu (in the menu bar above) > Refresh Dashboard to update')
+  sheet.getRange('A2').setValue('Click ⚾ Softball (far right of menu bar, after Help) > Refresh Dashboard to update')
     .setFontColor('#666666').setFontStyle('italic');
 
   // Section 1: Innings at Each Position
@@ -779,7 +779,7 @@ function createLineupSuggesterSheet(ss) {
   // Title and inputs
   sheet.getRange('A1').setValue('Lineup Suggester')
     .setFontSize(16).setFontWeight('bold');
-  sheet.getRange('A2').setValue('Go to the ⚾ Softball menu (in the menu bar above) > Suggest Lineup to generate')
+  sheet.getRange('A2').setValue('Click ⚾ Softball (far right of menu bar, after Help) > Suggest Lineup to generate')
     .setFontColor('#666666').setFontStyle('italic');
 
   sheet.getRange('A4').setValue('Innings:').setFontWeight('bold');
@@ -1139,8 +1139,9 @@ function createHowToUseSheet(ss) {
     ['⚾ SOFTBALL LINEUP MANAGER - Instructions', ''],
     ['', ''],
     ['FINDING THE MENU', ''],
-    ['Look for ⚾ Softball in the menu bar', 'It\'s at the top of the screen, next to File / Edit / View / etc.'],
-    ['If you don\'t see it', 'Refresh the page — the menu loads automatically when the spreadsheet opens'],
+    ['Look for ⚾ Softball in the menu bar', 'It appears at the far right end, after Extensions and Help'],
+    ['First time setup:', 'Go to Extensions > Apps Script, select onOpen, click Run (▶), and authorize when prompted'],
+    ['If you don\'t see it after that', 'Close and reopen the spreadsheet — the menu loads automatically on each open'],
     ['', ''],
     ['GETTING STARTED', ''],
     ['1. Go to the Roster sheet', 'Enter your players\' names (up to 12 players)'],
@@ -1152,12 +1153,12 @@ function createHowToUseSheet(ss) {
     ['2. Fill in the lineup grid', 'Use dropdowns to assign one player per position per inning'],
     ['3. Mark who sat out', 'Use the Sat Out column (players not assigned auto-count as sitting out)'],
     ['4. Enter batting stats (below lineup)', 'Fill in AB, hits (1B/2B/3B/HR), BB, SB, and CS for each player'],
-    ['5. Save the game', 'In the menu bar at the top, click ⚾ Softball > Save Game (saves both lineup and batting stats)'],
+    ['5. Save the game', 'Click ⚾ Softball (far right of menu bar) > Save Game (saves both lineup and batting stats)'],
     ['', ''],
     ['USING THE LINEUP SUGGESTER', ''],
     ['1. Go to the Lineup Suggester sheet', 'Check the boxes next to available players'],
     ['2. Set the number of innings', ''],
-    ['3. In the menu bar, click ⚾ Softball > Suggest Lineup', 'The algorithm will generate field positions AND a batting order'],
+    ['3. Click ⚾ Softball (far right of menu bar) > Suggest Lineup', 'The algorithm will generate field positions AND a batting order'],
     ['4. Review and edit', 'Use dropdowns to make manual adjustments to field positions'],
     ['5. Batting order section', 'Shows suggested batting order based on OBP, slugging, and speed stats'],
     ['6. Copy to Game Entry', 'Transfer the final lineup to the Game Entry sheet for the actual game'],
@@ -1170,7 +1171,7 @@ function createHowToUseSheet(ss) {
     ['New players (< 3 games):', 'Default to roster order until enough data is collected'],
     ['', ''],
     ['VIEWING THE DASHBOARD', ''],
-    ['1. Go to the Dashboard sheet', 'In the menu bar, click ⚾ Softball > Refresh Dashboard to update stats'],
+    ['1. Go to the Dashboard sheet', 'Click ⚾ Softball (far right of menu bar) > Refresh Dashboard to update stats'],
     ['2. Section 1: Innings at Each Position', 'Shows total innings each player has played at each position all season'],
     ['3. Section 2: Games Since Last Played', 'Yellow = 3+ games since, Red = 5+ games since playing that position'],
     ['4. Section 3: Batting Stats', 'Shows OBP, SLG, stolen bases, and caught stealing for each player'],
@@ -1192,7 +1193,7 @@ function createHowToUseSheet(ss) {
   // Bold column A for all rows (step numbers and bullets will be bold)
   sheet.getRange(1, 1, instructions.length, 1).setFontWeight('bold');
   // Section header rows
-  const sectionRows = [3, 7, 12, 19, 27, 34, 40];
+  const sectionRows = [3, 8, 13, 20, 28, 35, 41];
   sectionRows.forEach(row => {
     if (row <= instructions.length) {
       sheet.getRange(row, 1, 1, 2).setFontSize(13).setBackground('#e8f0fe');

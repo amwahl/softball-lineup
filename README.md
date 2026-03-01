@@ -29,9 +29,9 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
    - This grants the script permission to modify your spreadsheet
 
 5. **Return to your spreadsheet**
-   - You'll see a new **⚾ Softball** menu in the menu bar at the top (next to File, Edit, View, etc.)
+   - You'll see a new **⚾ Softball** menu at the far right of the menu bar (after Extensions and Help)
    - All 7 sheets will be created automatically
-   - If you don't see the menu, refresh the page — it loads automatically on open
+   - **Don't see the menu?** Go to Extensions > Apps Script, select `onOpen` from the function dropdown, click Run (▶), authorize when prompted, then close and reopen the spreadsheet
 
 ## Sheets Overview
 
@@ -79,5 +79,5 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 ## Notes
 
 - The `onEdit` trigger auto-updates dropdowns when you change roster names
-- The **⚾ Softball** menu appears after refreshing the page (or on each open)
+- The **⚾ Softball** menu appears at the far right of the menu bar (after Help) on each open
 - Dashboard colors: Yellow = 3+ games since, Red = 5+ games since playing a position
