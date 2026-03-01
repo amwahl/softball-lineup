@@ -133,6 +133,21 @@ function createGameEntrySheet(ss) {
   sheet.getRange('D1').setValue('← Fill in game details, then click ⚾ Softball (far right of the menu bar, after Help) > Save Game')
     .setFontColor('#666666').setFontStyle('italic');
 
+  // Attendance checkboxes (right side, starting at column N)
+  const attendCol = POSITIONS.length + 2 + (MAX_PLAYERS - POSITIONS.length) + 1; // after sit-out columns + gap
+  sheet.getRange(1, attendCol).setValue('Attendance')
+    .setFontWeight('bold').setFontSize(12);
+  const players = getRosterNames();
+  const attendCheckVals = [];
+  const attendNameVals = [];
+  for (let i = 0; i < MAX_PLAYERS; i++) {
+    attendCheckVals.push([i < players.length && players[i] ? true : false]);
+    attendNameVals.push([i < players.length && players[i] ? players[i] : '']);
+  }
+  sheet.getRange(2, attendCol, MAX_PLAYERS, 1).insertCheckboxes();
+  sheet.getRange(2, attendCol, MAX_PLAYERS, 1).setValues(attendCheckVals);
+  sheet.getRange(2, attendCol + 1, MAX_PLAYERS, 1).setValues(attendNameVals).setFontSize(11);
+
   // Lineup grid header (row 5)
   const maxSitOut = MAX_PLAYERS - POSITIONS.length; // typically 3
   const gridHeaders = ['Inning'];
@@ -162,8 +177,7 @@ function createGameEntrySheet(ss) {
     .setFontColor('white')
     .setHorizontalAlignment('center');
 
-  // Player rows for stats - auto-populate names from roster
-  const players = getRosterNames();
+  // Player rows for stats - use roster names from attendance section above
   const statsNames = [];
   const statsDefaults = [];
   for (let i = 0; i < MAX_PLAYERS; i++) {
@@ -289,10 +303,22 @@ function saveGame() {
   const maxSitOut = MAX_PLAYERS - POSITIONS.length;
   const gameData = gameSheet.getRange(6, 2, 9, POSITIONS.length + maxSitOut).getValues();
 
+  // Read attendance checkboxes to identify absent players
+  const attendCol = POSITIONS.length + 2 + maxSitOut + 1;
+  const attendData = gameSheet.getRange(2, attendCol, MAX_PLAYERS, 1).getValues();
+  const absentPlayers = new Set();
+  for (let i = 0; i < players.length; i++) {
+    if (players[i] && attendData[i][0] === false) {
+      absentPlayers.add(players[i]);
+    }
+  }
+
   for (let inning = 1; inning <= innings; inning++) {
     const inningData = gameData[inning - 1];
     for (let p = 0; p < players.length; p++) {
       const playerName = players[p];
+      // Skip absent players — they don't get history rows
+      if (absentPlayers.has(playerName)) continue;
       const dataRow = [gameNum, date, opponent, innings, inning, playerName];
 
       for (let j = 0; j < POSITIONS.length; j++) {
@@ -325,6 +351,12 @@ function saveGame() {
   gameSheet.getRange('B2').clearContent();
   const maxSitOutClear = MAX_PLAYERS - POSITIONS.length;
   gameSheet.getRange(6, 2, 9, POSITIONS.length + maxSitOutClear).clearContent();
+
+  // Reset attendance checkboxes to all checked
+  const attendColClear = POSITIONS.length + 2 + maxSitOutClear + 1;
+  const resetChecks = [];
+  for (let i = 0; i < MAX_PLAYERS; i++) resetChecks.push([true]);
+  gameSheet.getRange(2, attendColClear, MAX_PLAYERS, 1).setValues(resetChecks);
 
   // Clear batting stats section
   const statsStartRow = 16;
