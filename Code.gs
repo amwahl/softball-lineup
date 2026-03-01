@@ -116,7 +116,8 @@ function createRosterSheet(ss) {
 
 function createGameEntrySheet(ss) {
   let sheet = ss.getSheetByName('Game Entry');
-  if (sheet) sheet.clear(); else sheet = ss.insertSheet('Game Entry');
+  if (sheet) { sheet.clear(); sheet.getRange(1, 1, sheet.getMaxRows(), sheet.getMaxColumns()).clearDataValidations(); }
+  else sheet = ss.insertSheet('Game Entry');
 
   // Game info section
   sheet.getRange('A1').setValue('Date:').setFontWeight('bold');
