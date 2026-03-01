@@ -1155,7 +1155,27 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
       // Hard constraint: restricted = very high cost
       if (pref === 'Restricted') {
         score = 10000;
-      } else if (pref === 'Preferred') {
+      }
+
+      // No-return rule for P and C: if a player previously played this position
+      // but is no longer at it (i.e., they left), block them from returning
+      if (score < 10000 && (j === 0 || j === 1) && currentInning > 0) {
+        let everPlayedHere = false;
+        let atPosInLastInning = false;
+        for (let k = 0; k < currentInning; k++) {
+          if (previousInnings[k].indexOf(playerName) === j) {
+            everPlayedHere = true;
+          }
+        }
+        if (everPlayedHere) {
+          atPosInLastInning = (previousInnings[currentInning - 1].indexOf(playerName) === j);
+          if (!atPosInLastInning) {
+            score = 10000;
+          }
+        }
+      }
+
+      if (pref === 'Preferred') {
         score -= 20; // bonus for preferred
       }
       // Okay = neutral (0)
@@ -1288,6 +1308,7 @@ function createHowToUseSheet(ss) {
     ['', ''],
     ['TIPS', ''],
     ['• The Suggest Lineup algorithm:', 'Respects Restricted positions, keeps players at the same position for 2+ innings, and rotates sit-outs fairly'],
+    ['• No-return rule for P and C:', 'Once a player leaves the Pitcher or Catcher position during a game, the algorithm will not assign them back to that position in a later inning'],
     ['• Position continuity:', 'Players get a bonus for staying at the same position across innings (builds comfort)'],
     ['• Dashboard colors:', 'Help you spot players who need more time at certain positions'],
     ['• Mobile-friendly:', 'All dropdowns are large-format for easy phone/tablet use'],
