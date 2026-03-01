@@ -1157,6 +1157,16 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
         score = 10000;
       }
 
+      // Bullpen warmup rule: to start pitching, a player must have sat out
+      // the previous inning (continuing to pitch is fine, inning 0 is fine)
+      if (score < 10000 && j === 0 && currentInning > 0) {
+        const wasPitchingLast = (previousInnings[currentInning - 1][0] === playerName);
+        const wasSittingOutLast = (previousInnings[currentInning - 1].indexOf(playerName) === -1);
+        if (!wasPitchingLast && !wasSittingOutLast) {
+          score = 10000;
+        }
+      }
+
       // No-return rule for P and C: if a player previously played this position
       // but is no longer at it (i.e., they left), block them from returning
       if (score < 10000 && (j === 0 || j === 1) && currentInning > 0) {
@@ -1312,6 +1322,7 @@ function createHowToUseSheet(ss) {
     ['TIPS', ''],
     ['• The Suggest Lineup algorithm:', 'Respects Restricted positions, keeps players at the same position for 2+ innings, and rotates sit-outs fairly'],
     ['• No-return rule for P and C:', 'Once a player leaves the Pitcher or Catcher position during a game, the algorithm will not assign them back to that position in a later inning'],
+    ['• Bullpen warmup:', 'A new pitcher must have sat out the previous inning to warm up — the algorithm will only start a player at P if they were already pitching or were on the bench the inning before'],
     ['• Position continuity:', 'Players get a bonus for staying at the same position across innings (builds comfort)'],
     ['• Dashboard colors:', 'Help you spot players who need more time at certain positions'],
     ['• Mobile-friendly:', 'All dropdowns are large-format for easy phone/tablet use'],
