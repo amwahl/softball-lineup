@@ -29,8 +29,9 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
    - This grants the script permission to modify your spreadsheet
 
 5. **Return to your spreadsheet**
-   - You'll see a new **⚾ Softball** menu in the menu bar
+   - You'll see a new **⚾ Softball** menu in the menu bar at the top (next to File, Edit, View, etc.)
    - All 7 sheets will be created automatically
+   - If you don't see the menu, refresh the page — it loads automatically on open
 
 ## Sheets Overview
 
