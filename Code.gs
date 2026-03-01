@@ -1175,42 +1175,45 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
         }
       }
 
-      if (pref === 'Preferred') {
-        score -= 20; // bonus for preferred
-      }
-      // Okay = neutral (0)
-
-      // Depth chart: ranked players get a bonus
-      if (depthChart && depthChart[pos]) {
-        const rank = depthChart[pos].indexOf(playerName);
-        if (rank >= 0) {
-          score -= (MAX_PLAYERS - rank) * 3; // 1st = -36, 2nd = -33, ..., 12th = -3
+      // Skip all bonuses if already blocked (Restricted or no-return rule)
+      if (score < 10000) {
+        if (pref === 'Preferred') {
+          score -= 20; // bonus for preferred
         }
-      }
+        // Okay = neutral (0)
 
-      // Recency: prioritize positions not played recently
-      const gamesSince = (gamesSinceAtPosition[playerName] && gamesSinceAtPosition[playerName][pos]) || 0;
-      score -= gamesSince * 5; // more games since = lower score = more priority
-
-      // Position continuity: bonus for staying at same position
-      if (currentInning > 0) {
-        const prevAssignment = previousInnings[currentInning - 1];
-        const prevPosIndex = prevAssignment.indexOf(playerName);
-        if (prevPosIndex === j) {
-          // Count consecutive innings at this position
-          let consecutiveCount = 1;
-          for (let k = currentInning - 2; k >= 0; k--) {
-            if (previousInnings[k].indexOf(playerName) === j) {
-              consecutiveCount++;
-            } else {
-              break;
-            }
+        // Depth chart: ranked players get a bonus
+        if (depthChart && depthChart[pos]) {
+          const rank = depthChart[pos].indexOf(playerName);
+          if (rank >= 0) {
+            score -= (MAX_PLAYERS - rank) * 3; // 1st = -36, 2nd = -33, ..., 12th = -3
           }
+        }
 
-          if (consecutiveCount >= 2) {
-            score -= 15; // 3rd+ consecutive inning: stronger bonus
-          } else {
-            score -= 10; // 2nd consecutive inning: standard bonus
+        // Recency: prioritize positions not played recently
+        const gamesSince = (gamesSinceAtPosition[playerName] && gamesSinceAtPosition[playerName][pos]) || 0;
+        score -= gamesSince * 5; // more games since = lower score = more priority
+
+        // Position continuity: bonus for staying at same position
+        if (currentInning > 0) {
+          const prevAssignment = previousInnings[currentInning - 1];
+          const prevPosIndex = prevAssignment.indexOf(playerName);
+          if (prevPosIndex === j) {
+            // Count consecutive innings at this position
+            let consecutiveCount = 1;
+            for (let k = currentInning - 2; k >= 0; k--) {
+              if (previousInnings[k].indexOf(playerName) === j) {
+                consecutiveCount++;
+              } else {
+                break;
+              }
+            }
+
+            if (consecutiveCount >= 2) {
+              score -= 15; // 3rd+ consecutive inning: stronger bonus
+            } else {
+              score -= 10; // 2nd consecutive inning: standard bonus
+            }
           }
         }
       }
