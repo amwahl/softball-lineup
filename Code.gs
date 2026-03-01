@@ -134,9 +134,12 @@ function createGameEntrySheet(ss) {
     .setFontColor('#666666').setFontStyle('italic');
 
   // Lineup grid header (row 5)
+  const maxSitOut = MAX_PLAYERS - POSITIONS.length; // typically 3
   const gridHeaders = ['Inning'];
   POSITIONS.forEach(p => gridHeaders.push(p));
-  gridHeaders.push('Sat Out');
+  for (let s = 1; s <= maxSitOut; s++) {
+    gridHeaders.push('Sit Out ' + s);
+  }
   sheet.getRange(5, 1, 1, gridHeaders.length).setValues([gridHeaders])
     .setFontWeight('bold')
     .setBackground('#1a73e8')
@@ -193,12 +196,13 @@ function updateGameEntryDropdowns() {
     .build();
   sheet.getRange(6, 2, 9, POSITIONS.length).setDataValidation(posRule);
 
-  // Sat out column - apply to entire column range at once
+  // Sat out columns - apply to all sit-out columns
+  const maxSitOut = MAX_PLAYERS - POSITIONS.length;
   const satOutRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(players, true)
     .setAllowInvalid(true)
     .build();
-  sheet.getRange(6, POSITIONS.length + 2, 9, 1).setDataValidation(satOutRule);
+  sheet.getRange(6, POSITIONS.length + 2, 9, maxSitOut).setDataValidation(satOutRule);
 
   // Update player names in batting stats section
   const statsStartRow = 16;
@@ -282,7 +286,8 @@ function saveGame() {
   // Collect lineup data - batch read all game data at once
   const players = getRosterNames();
   const rows = [];
-  const gameData = gameSheet.getRange(6, 2, 9, POSITIONS.length + 1).getValues();
+  const maxSitOut = MAX_PLAYERS - POSITIONS.length;
+  const gameData = gameSheet.getRange(6, 2, 9, POSITIONS.length + maxSitOut).getValues();
 
   for (let inning = 1; inning <= innings; inning++) {
     const inningData = gameData[inning - 1];
@@ -294,10 +299,12 @@ function saveGame() {
         dataRow.push(inningData[j] === playerName ? 1 : 0);
       }
 
-      // Check sat out
-      const satOut = (inningData[POSITIONS.length] || '').toString();
-      const isSatOut = satOut.indexOf(playerName) >= 0 ||
-        (!POSITIONS.some((_, j) => inningData[j] === playerName));
+      // Check sat out — check all sit-out columns or if not assigned any position
+      let isSatOut = !POSITIONS.some((_, j) => inningData[j] === playerName);
+      for (let s = 0; s < maxSitOut; s++) {
+        const satOutVal = (inningData[POSITIONS.length + s] || '').toString();
+        if (satOutVal === playerName) isSatOut = true;
+      }
       dataRow.push(isSatOut ? 1 : 0);
 
       rows.push(dataRow);
@@ -316,7 +323,8 @@ function saveGame() {
   // Clear game entry for next use
   gameSheet.getRange('B1').clearContent();
   gameSheet.getRange('B2').clearContent();
-  gameSheet.getRange(6, 2, 9, POSITIONS.length + 1).clearContent();
+  const maxSitOutClear = MAX_PLAYERS - POSITIONS.length;
+  gameSheet.getRange(6, 2, 9, POSITIONS.length + maxSitOutClear).clearContent();
 
   // Clear batting stats section
   const statsStartRow = 16;
