@@ -5,7 +5,8 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 ## Features
 
 - **Roster Management** — Track up to 12 players with per-position preferences (Preferred / Okay / Restricted)
-- **Game Entry** — Record fielding lineups and batting stats per game with dropdown-based input
+- **Depth Chart** — Rank players at each position to guide the lineup algorithm
+- **Game Entry** — Record each game's lineup and batting stats with dropdowns, attendance checkboxes, and multiple sit-out columns
 - **Lineup Suggester** — Auto-generate balanced field lineups that respect preferences, rotate positions fairly, and keep players at the same position for multiple innings
 - **Batting Order** — Suggest optimal batting orders based on OBP, slugging, and speed stats
 - **Season Dashboard** — View innings at each position, recency tracking, and cumulative batting stats
@@ -30,7 +31,7 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 
 5. **Return to your spreadsheet**
    - You'll see a new **⚾ Softball** menu at the far right of the menu bar (after Extensions and Help)
-   - All 7 sheets will be created automatically
+   - All 8 sheets will be created automatically
    - **Don't see the menu?** Go to Extensions > Apps Script, select `onOpen` from the function dropdown, click Run (▶), authorize when prompted, then close and reopen the spreadsheet
 
 ## Sheets Overview
@@ -38,9 +39,10 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 | Sheet | Purpose |
 |-------|---------|
 | **Roster** | Enter player names and position preferences |
-| **Game Entry** | Record each game's lineup and batting stats |
+| **Depth Chart** | Rank players at each position (used by the lineup algorithm) |
+| **Game Entry** | Record each game's lineup, batting stats, and attendance |
 | **Season History** | Auto-populated fielding data (don't edit directly) |
-| **Batting Stats** | Auto-populated batting data (don't edit directly) |
+| **Batting Stats** | Auto-populated per-game batting data (editable to fix errors) |
 | **Dashboard** | Season stats at a glance — fielding and batting |
 | **Lineup Suggester** | Auto-generate field lineups and batting orders |
 | **How To Use** | In-app instructions |
@@ -58,10 +60,14 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 
 ### Field Lineup Algorithm
 
-- Scores each player-position combination based on preference, recency, and continuity
+- Scores each player-position combination based on preference, depth chart ranking, recency, and continuity
 - Restricted positions are hard constraints (never assigned)
+- **No-return rule for P/C:** Once a player leaves Pitcher or Catcher, they cannot return to that position later in the game
+- **Bullpen warmup:** A new pitcher must have sat out the previous inning (to warm up); continuing pitchers are unaffected
+- **P/C continuity:** Pitcher and Catcher get a stronger continuity bonus than field positions, since leaving is permanent
 - Players get a bonus for staying at the same position across innings (builds comfort and confidence)
-- Sit-outs rotate fairly based on innings played and historical sit-out counts
+- Sit-outs rotate fairly — avoids consecutive sit-outs for the same player, and proactively sits out the next depth-chart pitcher to enable warmup
+- Recency is per-player — absent games don't inflate "games since last played"
 
 ### Batting Order Algorithm
 
@@ -81,3 +87,5 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - The `onEdit` trigger auto-updates dropdowns when you change roster names
 - The **⚾ Softball** menu appears at the far right of the menu bar (after Help) on each open
 - Dashboard colors: Yellow = 3+ games since, Red = 5+ games since playing a position
+- **Attendance:** Uncheck absent players on Game Entry before saving — they are excluded from season history and don't affect recency scoring
+- **Batting Stats corrections:** You can edit the Batting Stats sheet directly to fix errors, then Refresh Dashboard
