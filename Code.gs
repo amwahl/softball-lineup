@@ -1284,13 +1284,14 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
         score = 10000;
       }
 
-      // Bullpen warmup rule: to start pitching, a player must have sat out
-      // the previous inning (continuing to pitch is fine, inning 0 is fine)
+      // Bullpen warmup rule: prefer pitchers who sat out the previous inning
+      // (continuing to pitch is fine, inning 0 is fine)
+      // Soft penalty — strongly discouraged but allowed if no warmed-up pitcher is available
       if (score < 10000 && j === 0 && currentInning > 0) {
         const wasPitchingLast = (previousInnings[currentInning - 1][0] === playerName);
         const wasSittingOutLast = (previousInnings[currentInning - 1].indexOf(playerName) === -1);
         if (!wasPitchingLast && !wasSittingOutLast) {
-          score = 10000;
+          score += 200;
         }
       }
 
@@ -1379,6 +1380,7 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
 
     for (let p = 0; p < numPlayers; p++) {
       if (assigned.has(p)) continue;
+      if (scores[p][posIdx] >= 10000) continue; // never assign blocked players
       if (scores[p][posIdx] < bestScore) {
         bestScore = scores[p][posIdx];
         bestPlayer = p;
