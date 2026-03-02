@@ -1522,10 +1522,11 @@ function createHowToUseSheet(ss) {
     ['', ''],
     ['ENTERING A GAME', ''],
     ['1. Go to the Game Entry sheet', 'Fill in the date, opponent, and number of innings'],
-    ['2. Fill in the lineup grid', 'Use dropdowns to assign one player per position per inning'],
-    ['3. Mark who sat out', 'Use the Sat Out column (players not assigned auto-count as sitting out)'],
-    ['4. Enter batting stats (below lineup)', 'Fill in AB, hits (1B/2B/3B/HR), BB, SB, and CS for each player'],
-    ['5. Save the game', 'Click ⚾ Softball (far right of menu bar) > Save Game (saves both lineup and batting stats)'],
+    ['2. Mark attendance', 'Uncheck absent players using the checkboxes in the left sidebar'],
+    ['3. Fill in the lineup grid', 'Use dropdowns to assign one player per position per inning'],
+    ['4. Mark who sat out', 'Use the Sat Out columns (up to 3 players can sit out per inning)'],
+    ['5. Enter batting stats (below lineup)', 'Fill in AB, hits (1B/2B/3B/HR), BB, SB, and CS for each player'],
+    ['6. Save the game', 'Click ⚾ Softball (far right of menu bar) > Save Game (saves both lineup and batting stats)'],
     ['', ''],
     ['DEPTH CHART', ''],
     ['1. Go to the Depth Chart sheet', 'Rank players per position (1st = top choice, leave blank for unranked)'],
@@ -1535,11 +1536,13 @@ function createHowToUseSheet(ss) {
     ['', ''],
     ['USING THE LINEUP SUGGESTER', ''],
     ['1. Go to the Lineup Suggester sheet', 'Check the boxes next to available players'],
-    ['2. Set the number of innings', ''],
-    ['3. Click ⚾ Softball (far right of menu bar) > Suggest Lineup', 'The algorithm will generate field positions AND a batting order'],
-    ['4. Review and edit', 'Use dropdowns to make manual adjustments to field positions'],
-    ['5. Batting order section', 'Shows suggested batting order based on OBP, slugging, and speed stats'],
-    ['6. Copy to Game Entry', 'Transfer the final lineup to the Game Entry sheet for the actual game'],
+    ['2. Rest P / Rest C columns', 'Check these to hold a player back from Pitcher or Catcher for this game (great for friendlies or resting arms)'],
+    ['3. Set the number of innings', ''],
+    ['4. Click ⚾ Softball (far right of menu bar) > Suggest Lineup', 'The algorithm will generate field positions AND a batting order'],
+    ['5. Review the output', 'Sit-out cap and relief pitcher suggestion are shown below the lineup grid'],
+    ['6. Edit if needed', 'Use dropdowns to make manual adjustments to field positions'],
+    ['7. Batting order section', 'Shows suggested batting order based on OBP, slugging, and speed stats'],
+    ['8. Copy to Game Entry', 'Transfer the final lineup to the Game Entry sheet for the actual game'],
     ['', ''],
     ['UNDERSTANDING THE BATTING ORDER', ''],
     ['Spots 1-3 (top of order):', 'Best OBP + speed — players who get on base and steal'],
@@ -1555,14 +1558,17 @@ function createHowToUseSheet(ss) {
     ['4. Section 3: Batting Stats', 'Shows OBP, SLG, stolen bases, and caught stealing for each player'],
     ['', ''],
     ['TIPS', ''],
-    ['• The Suggest Lineup algorithm:', 'Respects Restricted positions, keeps players at the same position for 2+ innings, and rotates sit-outs fairly'],
-    ['• No-return rule for P and C:', 'Once a player leaves the Pitcher or Catcher position during a game, the algorithm will not assign them back to that position in a later inning'],
-    ['• Bullpen warmup:', 'A new pitcher must have sat out the previous inning to warm up — the algorithm will only start a player at P if they were already pitching or were on the bench the inning before'],
-    ['• Position continuity:', 'Players get a bonus for staying at the same position across innings (builds comfort)'],
-    ['• Dashboard colors:', 'Help you spot players who need more time at certain positions'],
-    ['• Mobile-friendly:', 'All dropdowns are large-format for easy phone/tablet use'],
-    ['• Season History sheet:', 'Stores all game data - don\'t edit directly unless fixing errors'],
-    ['• Batting Stats sheet:', 'Stores per-game batting data - don\'t edit directly unless fixing errors'],
+    ['• Sit-out cap:', 'No player sits out more than their fair share per game — the cap is shown in the lineup output'],
+    ['• Field position rotation:', 'Players rotate across field positions — the algorithm penalizes staying at the same non-P/C spot for 3+ innings'],
+    ['• No-return rule for P (hard):', 'Once a player leaves Pitcher, they cannot return to that position later in the game'],
+    ['• No-return rule for C (soft):', 'Once a player leaves Catcher, the algorithm strongly avoids putting them back but will allow it if needed'],
+    ['• Bullpen warmup:', 'The algorithm prefers pitchers who sat out the previous inning to warm up, but will assign one without warmup if needed'],
+    ['• Relief pitcher:', 'A suggested relief pitcher is shown below the lineup in case the starter needs to come out'],
+    ['• Rest P / Rest C:', 'Use these checkboxes on the Lineup Suggester to rest key players from P or C for specific games'],
+    ['• Absent players:', 'Uncheck on Game Entry before saving — they are excluded from season history and don\'t affect recency scoring'],
+    ['• Dashboard colors:', 'Yellow = 3+ games since, Red = 5+ games since playing a position'],
+    ['• Season History sheet:', 'Stores all game data — don\'t edit directly unless fixing errors'],
+    ['• Batting Stats sheet:', 'Stores per-game batting data — editable to fix errors, then Refresh Dashboard'],
   ];
 
   sheet.getRange(1, 1, instructions.length, 2).setValues(instructions);
@@ -1573,7 +1579,7 @@ function createHowToUseSheet(ss) {
   // Bold column A for all rows (step numbers and bullets will be bold)
   sheet.getRange(1, 1, instructions.length, 1).setFontWeight('bold');
   // Section header rows
-  const sectionRows = [3, 8, 13, 20, 26, 34, 41, 47];
+  const sectionRows = [3, 8, 13, 21, 27, 37, 43, 48];
   sectionRows.forEach(row => {
     if (row <= instructions.length) {
       sheet.getRange(row, 1, 1, 2).setFontSize(13).setBackground('#e8f0fe');

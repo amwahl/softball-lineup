@@ -7,7 +7,7 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - **Roster Management** — Track up to 12 players with per-position preferences (Preferred / Okay / Restricted)
 - **Depth Chart** — Rank players at each position to guide the lineup algorithm
 - **Game Entry** — Record each game's lineup and batting stats with dropdowns, attendance checkboxes, and multiple sit-out columns
-- **Lineup Suggester** — Auto-generate balanced field lineups that respect preferences, rotate positions fairly, and keep players at the same position for multiple innings
+- **Lineup Suggester** — Auto-generate balanced field lineups with rest options, relief pitcher suggestions, and fair sit-out rotation
 - **Batting Order** — Suggest optimal batting orders based on OBP, slugging, and speed stats
 - **Season Dashboard** — View innings at each position, recency tracking, and cumulative batting stats
 
@@ -70,7 +70,15 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - **Field position rotation:** Players get a small bonus for a 2nd consecutive inning at the same position, but a growing penalty for 3+ innings to encourage rotation across the field
 - **Sit-out cap:** No player sits out more than their fair share — the cap is calculated as `ceil(total sit-out slots / players)`, so with 12 players and 5 innings, no one sits more than 2
 - Sit-outs rotate fairly — avoids consecutive sit-outs for the same player, and proactively sits out the next depth-chart pitcher to enable warmup
+- **Relief pitcher:** The output suggests a relief pitcher from the depth chart in case the starter needs to come out
 - Recency is per-player — absent games don't inflate "games since last played"
+
+### Rest Flags (P / C)
+
+- On the Lineup Suggester, check **Rest P** or **Rest C** next to a player to hold them back from Pitcher or Catcher for that game
+- Useful for friendlies, early tournament games, or resting arms for a later bracket game
+- The player still plays all other positions — only the checked position is blocked
+- Rest flags reset when you change the roster but are preserved between lineup generations
 
 ### Batting Order Algorithm
 
@@ -99,8 +107,9 @@ The Game Entry sheet is organized top to bottom:
 To update `Code.gs` without losing data:
 
 1. Open **Extensions > Apps Script** and paste the new code over the old
-2. Save, then use **⚾ Softball > Rebuild Game Entry** to update the Game Entry layout
-3. Season History, Batting Stats, Roster, and Depth Chart are all preserved
+2. Save, then run `rebuildGameEntry` from the function dropdown to update the Game Entry layout
+3. To refresh the Lineup Suggester layout (e.g., for new Rest P/C columns), run `initializeStep2` from the function dropdown
+4. Season History, Batting Stats, Roster, and Depth Chart are all preserved
 
 ## Notes
 
