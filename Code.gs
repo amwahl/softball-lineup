@@ -939,21 +939,27 @@ function createLineupSuggesterSheet(ss) {
     .requireNumberBetween(1, 9).setAllowInvalid(false).build();
   sheet.getRange('B4').setDataValidation(inningsVal);
 
-  // Player availability checkboxes
+  // Player availability checkboxes with rest columns
   sheet.getRange('A6').setValue('Available Players:')
     .setFontWeight('bold').setFontSize(12);
+  sheet.getRange('C6').setValue('Rest P').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  sheet.getRange('D6').setValue('Rest C').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
 
   const players = getRosterNames();
   // Batch: insert checkboxes for entire range, then batch write values
   sheet.getRange(7, 1, MAX_PLAYERS, 1).insertCheckboxes();
+  sheet.getRange(7, 3, MAX_PLAYERS, 2).insertCheckboxes();
   const checkVals = [];
   const nameVals = [];
+  const restVals = [];
   for (let i = 0; i < MAX_PLAYERS; i++) {
     checkVals.push([i < players.length && players[i] ? true : false]);
     nameVals.push([i < players.length && players[i] ? players[i] : '']);
+    restVals.push([false, false]); // Rest P, Rest C — unchecked by default
   }
   sheet.getRange(7, 1, MAX_PLAYERS, 1).setValues(checkVals);
   sheet.getRange(7, 2, MAX_PLAYERS, 1).setValues(nameVals).setFontSize(11);
+  sheet.getRange(7, 3, MAX_PLAYERS, 2).setValues(restVals);
 
   // Suggested lineup area (row 21+)
   const lineupStartRow = 7 + MAX_PLAYERS + 1;
@@ -1027,12 +1033,16 @@ function suggestLineup() {
     return;
   }
 
-  // Get available players - batch read
+  // Get available players and rest flags - batch read
   const availablePlayers = [];
+  const restFlags = {}; // playerName -> { P: true/false, C: true/false }
   const checkData = suggesterSheet.getRange(7, 1, MAX_PLAYERS, 2).getValues();
+  const restData = suggesterSheet.getRange(7, 3, MAX_PLAYERS, 2).getValues();
   for (let i = 0; i < MAX_PLAYERS; i++) {
     if (checkData[i][0] && checkData[i][1]) {
-      availablePlayers.push(checkData[i][1]);
+      const name = checkData[i][1];
+      availablePlayers.push(name);
+      restFlags[name] = { P: !!restData[i][0], C: !!restData[i][1] };
     }
   }
 
@@ -1052,6 +1062,11 @@ function suggestLineup() {
       preferences[name] = {};
       for (let j = 0; j < POSITIONS.length; j++) {
         preferences[name][POSITIONS[j]] = rosterData[i][j + 1] || 'Okay';
+      }
+      // Apply rest flags — override to Restricted for this game only
+      if (restFlags[name]) {
+        if (restFlags[name].P) preferences[name]['P'] = 'Restricted';
+        if (restFlags[name].C) preferences[name]['C'] = 'Restricted';
       }
     }
   }
@@ -1605,23 +1620,28 @@ function updateSuggesterNames() {
   if (!sheet) return;
 
   const players = getRosterNames();
-  // Read existing checkboxes and names to preserve user selections
+  // Read existing checkboxes, names, and rest columns to preserve user selections
   const existingChecks = sheet.getRange(7, 1, MAX_PLAYERS, 1).getValues();
   const existingNames = sheet.getRange(7, 2, MAX_PLAYERS, 1).getValues();
+  const existingRest = sheet.getRange(7, 3, MAX_PLAYERS, 2).getValues();
 
   const checkValues = [];
   const nameValues = [];
+  const restValues = [];
   for (let i = 0; i < MAX_PLAYERS; i++) {
     if (i < players.length) {
       // Preserve checkbox state if the name hasn't changed; default to true for new names
       const nameChanged = existingNames[i][0] !== players[i];
       checkValues.push([nameChanged ? true : existingChecks[i][0]]);
       nameValues.push([players[i]]);
+      restValues.push(nameChanged ? [false, false] : [existingRest[i][0], existingRest[i][1]]);
     } else {
       checkValues.push([false]);
       nameValues.push(['']);
+      restValues.push([false, false]);
     }
   }
   sheet.getRange(7, 1, MAX_PLAYERS, 1).setValues(checkValues);
   sheet.getRange(7, 2, MAX_PLAYERS, 1).setValues(nameValues);
+  sheet.getRange(7, 3, MAX_PLAYERS, 2).setValues(restValues);
 }
