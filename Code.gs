@@ -864,7 +864,6 @@ function refreshDashboard() {
   }
 
   // Section 2: Games since last played - batch write
-  const sec2StartRow = 5 + MAX_PLAYERS + 2;
   const sec2DataRow = sec2StartRow + 2;
   const sec2Data = [];
   const sec2Backgrounds = [];
@@ -906,7 +905,6 @@ function refreshDashboard() {
 
   // Section 3: Batting stats - batch write
   const battingAverages = computeBattingAverages();
-  const sec3StartRow = sec2StartRow + MAX_PLAYERS + 3;
   const sec3DataRow = sec3StartRow + 2;
   const sec3Data = [];
 
