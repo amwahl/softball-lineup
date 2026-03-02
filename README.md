@@ -61,9 +61,9 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 ### Field Lineup Algorithm
 
 - Scores each player-position combination based on preference, depth chart ranking, recency, and continuity
-- Restricted positions are hard constraints (never assigned)
+- Restricted positions are hard constraints — a player will never be assigned to a Restricted position
 - **No-return rule for P/C:** Once a player leaves Pitcher or Catcher, they cannot return to that position later in the game
-- **Bullpen warmup:** A new pitcher must have sat out the previous inning (to warm up); continuing pitchers are unaffected
+- **Bullpen warmup (soft):** The algorithm prefers pitchers who sat out the previous inning to warm up, but will assign an available pitcher without warmup if needed
 - **P/C continuity:** Pitcher and Catcher get a stronger continuity bonus than field positions, since leaving is permanent
 - Players get a bonus for staying at the same position across innings (builds comfort and confidence)
 - Sit-outs rotate fairly — avoids consecutive sit-outs for the same player, and proactively sits out the next depth-chart pitcher to enable warmup
@@ -82,6 +82,15 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - **Fielding:** Innings at each position, sit-outs, games since last played each position
 - **Batting:** AB, 1B, 2B, 3B, HR, BB, SB, CS, OBP, SLG
 
+## Game Entry Layout
+
+The Game Entry sheet is organized top to bottom:
+
+1. **Game info** (rows 1-3) — Date, Opponent, Innings
+2. **Attendance** (rows 5-17) — Checkbox + player name for each roster player; uncheck absent players
+3. **Lineup grid** (rows 19-28) — Position assignments and sit-outs per inning
+4. **Batting stats** (rows 30+) — Per-player at-bats, hits, walks, steals
+
 ## Notes
 
 - The `onEdit` trigger auto-updates dropdowns when you change roster names
@@ -89,3 +98,4 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - Dashboard colors: Yellow = 3+ games since, Red = 5+ games since playing a position
 - **Attendance:** Uncheck absent players on Game Entry before saving — they are excluded from season history and don't affect recency scoring
 - **Batting Stats corrections:** You can edit the Batting Stats sheet directly to fix errors, then Refresh Dashboard
+- **Lineup Suggester:** Player names refresh automatically from the roster each time you generate a lineup
