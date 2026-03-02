@@ -67,6 +67,7 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - **No-return rule for P (hard):** Once a player leaves Pitcher, they cannot return to that position later in the game
 - **No-return rule for C (soft):** Once a player leaves Catcher, the algorithm strongly avoids putting them back but will allow it if needed
 - **Bullpen warmup (soft):** The algorithm prefers pitchers who sat out the previous inning to warm up, but will assign an available pitcher without warmup if needed
+- **Minimum 2-inning start:** Starting Pitcher and Catcher are locked in for at least the first 2 innings
 - **P/C continuity:** Pitcher and Catcher get a stronger continuity bonus than field positions, since leaving is permanent
 - **Field position rotation:** Players get a small bonus for a 2nd consecutive inning at the same position, but a growing penalty for 3+ innings to encourage rotation across the field
 - **Outfield-only avoidance:** Players who have only played outfield (LF/CF/RF) for 2+ innings get a bonus toward infield positions to mix things up
