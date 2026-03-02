@@ -1167,6 +1167,25 @@ function suggestLineup() {
     }
   }
 
+  // Validate that enough players can pitch and catch
+  const canPitch = availablePlayers.filter(p => preferences[p] && preferences[p]['P'] !== 'Restricted');
+  const canCatch = availablePlayers.filter(p => preferences[p] && preferences[p]['C'] !== 'Restricted');
+  const warnings = [];
+  if (canPitch.length === 0) {
+    warnings.push('No players available to pitch! Check Rest P flags and roster restrictions.');
+  } else if (canPitch.length < 2) {
+    warnings.push('Only 1 player can pitch (' + canPitch[0] + '). Consider unchecking a Rest P flag for a backup.');
+  }
+  if (canCatch.length === 0) {
+    warnings.push('No players available to catch! Check Rest C flags and roster restrictions.');
+  } else if (canCatch.length < 2) {
+    warnings.push('Only 1 player can catch (' + canCatch[0] + '). Consider unchecking a Rest C flag for a backup.');
+  }
+  if (warnings.length > 0) {
+    const proceed = ui.alert('Lineup Warning', warnings.join('\n') + '\n\nContinue anyway?', ui.ButtonSet.YES_NO);
+    if (proceed !== ui.Button.YES) return;
+  }
+
   // Get history stats for recency scoring
   // Uses per-player game counts so absent games don't inflate recency
   const gamesSinceAtPosition = {};
@@ -1611,19 +1630,29 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
   for (const posIdx of posOrder) {
     let bestPlayer = -1;
     let bestScore = Infinity;
+    let fallbackPlayer = -1;
+    let fallbackScore = Infinity;
 
     for (let p = 0; p < numPlayers; p++) {
       if (assigned.has(p)) continue;
-      if (scores[p][posIdx] >= 10000) continue; // never assign blocked players
-      if (scores[p][posIdx] < bestScore) {
+      if (scores[p][posIdx] < 10000 && scores[p][posIdx] < bestScore) {
         bestScore = scores[p][posIdx];
         bestPlayer = p;
+      }
+      // Track best fallback in case all players are blocked (score >= 10000)
+      if (scores[p][posIdx] < fallbackScore) {
+        fallbackScore = scores[p][posIdx];
+        fallbackPlayer = p;
       }
     }
 
     if (bestPlayer >= 0) {
       assignment[posIdx] = players[bestPlayer];
       assigned.add(bestPlayer);
+    } else if (fallbackPlayer >= 0) {
+      // No unblocked player — assign the least-bad option to avoid a blank
+      assignment[posIdx] = players[fallbackPlayer];
+      assigned.add(fallbackPlayer);
     }
   }
 
