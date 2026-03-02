@@ -1163,6 +1163,11 @@ function suggestLineup() {
         }
       }
 
+      // Calculate max sit-outs per player this game for fairness
+      // Distribute sit-outs as evenly as possible: ceil(total sit-out slots / players)
+      const totalSitOutSlots = innings * numSitOut;
+      const maxSitOutPerPlayer = Math.ceil(totalSitOutSlots / availablePlayers.length);
+
       // Sort by: most innings played this game first, then by least historical sat out
       const candidates = availablePlayers.slice().sort((a, b) => {
         // Primary: who has played the most innings this game
@@ -1172,10 +1177,19 @@ function suggestLineup() {
         return (totalSatOut[a] || 0) - (totalSatOut[b] || 0);
       });
 
+      // Filter out players who have hit the per-game sit-out cap
+      const sitOutsThisGame = {};
+      availablePlayers.forEach(p => {
+        sitOutsThisGame[p] = inning - inningCountThisGame[p];
+      });
+      const eligible = candidates.filter(c => sitOutsThisGame[c] < maxSitOutPerPlayer);
+      // Fall back to full list if everyone has hit the cap (shouldn't happen with correct math)
+      const pool = eligible.length >= numSitOut ? eligible : candidates;
+
       // Pick sit-outs, avoiding consecutive sit-outs when possible
       const consecutive = [];
       const nonConsecutive = [];
-      for (const c of candidates) {
+      for (const c of pool) {
         if (lastSitOuts.indexOf(c) >= 0) {
           consecutive.push(c);
         } else {
@@ -1193,8 +1207,10 @@ function suggestLineup() {
       // there's room to swap them in, replace the last (least priority) sit-out
       if (nextPitcher && sittingOut.indexOf(nextPitcher) < 0) {
         // Only swap if the next pitcher isn't the current pitcher
+        // and hasn't already hit the sit-out cap
         const currentPitcher = inning > 0 ? lineup[inning - 1][0] : null;
-        if (nextPitcher !== currentPitcher) {
+        const nextPitcherSitOuts = inning - inningCountThisGame[nextPitcher];
+        if (nextPitcher !== currentPitcher && nextPitcherSitOuts < maxSitOutPerPlayer) {
           // Replace the last sit-out (lowest priority) with the next pitcher
           sittingOut[sittingOut.length - 1] = nextPitcher;
         }

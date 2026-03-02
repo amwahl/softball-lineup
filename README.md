@@ -68,6 +68,7 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - **Bullpen warmup (soft):** The algorithm prefers pitchers who sat out the previous inning to warm up, but will assign an available pitcher without warmup if needed
 - **P/C continuity:** Pitcher and Catcher get a stronger continuity bonus than field positions, since leaving is permanent
 - Players get a bonus for staying at the same position across innings (builds comfort and confidence)
+- **Sit-out cap:** No player sits out more than their fair share — the cap is calculated as `ceil(total sit-out slots / players)`, so with 12 players and 5 innings, no one sits more than 2
 - Sit-outs rotate fairly — avoids consecutive sit-outs for the same player, and proactively sits out the next depth-chart pitcher to enable warmup
 - Recency is per-player — absent games don't inflate "games since last played"
 
