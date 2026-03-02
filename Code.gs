@@ -1298,8 +1298,8 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
         }
       }
 
-      // No-return rule for P and C: if a player previously played this position
-      // but is no longer at it (i.e., they left), block them from returning
+      // No-return rule for P (hard block) and C (soft penalty):
+      // if a player left the position, discourage or block returning
       if (score < 10000 && (j === 0 || j === 1) && currentInning > 0) {
         let everPlayedHere = false;
         let atPosInLastInning = false;
@@ -1311,7 +1311,11 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
         if (everPlayedHere) {
           atPosInLastInning = (previousInnings[currentInning - 1].indexOf(playerName) === j);
           if (!atPosInLastInning) {
-            score = 10000;
+            if (j === 0) {
+              score = 10000; // P: hard block — never return after leaving
+            } else {
+              score += 200; // C: strongly discouraged but allowed if needed
+            }
           }
         }
       }
