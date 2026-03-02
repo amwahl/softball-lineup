@@ -1065,44 +1065,47 @@ function createLineupSuggesterSheet(ss) {
     .requireNumberBetween(1, 9).setAllowInvalid(false).build();
   sheet.getRange('B4').setDataValidation(inningsVal);
 
-  sheet.getRange('F4').setValue('Games:').setFontWeight('bold');
-  sheet.getRange('G4').setValue(1);
+  sheet.getRange('C4').setValue('Games:').setFontWeight('bold');
+  sheet.getRange('D4').setValue(1);
   const gamesList = [];
   for (let g = 1; g <= MAX_GAMES; g++) gamesList.push(String(g));
   const gamesVal = SpreadsheetApp.newDataValidation()
     .requireValueInList(gamesList, true).setAllowInvalid(false).build();
-  sheet.getRange('G4').setDataValidation(gamesVal);
+  sheet.getRange('D4').setDataValidation(gamesVal);
 
-  // Player availability checkboxes: A=checkbox, B=name, C=G1, D=G2, E=G3, F=Rest P, G=Rest C
+  // Player availability: A=checkbox, B=name, C=Rest P, D=Rest C, E=G1, F=G2, G=G3
+  // G1 is always checked for available players. G2/G3 hidden when Games=1.
+  // Rest P / Rest C stay in the familiar C/D position from the old layout.
   sheet.getRange('A6').setValue('Available Players:')
     .setFontWeight('bold').setFontSize(12);
-  sheet.getRange('C6').setValue('G1').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
-  sheet.getRange('D6').setValue('G2').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
-  sheet.getRange('E6').setValue('G3').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
-  sheet.getRange('F6').setValue('Rest P').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
-  sheet.getRange('G6').setValue('Rest C').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  sheet.getRange('C6').setValue('Rest P').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  sheet.getRange('D6').setValue('Rest C').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  sheet.getRange('E6').setValue('G1').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  sheet.getRange('F6').setValue('G2').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  sheet.getRange('G6').setValue('G3').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
 
   const players = getRosterNames();
-  // Batch: insert checkboxes for entire range, then batch write values
   sheet.getRange(7, 1, MAX_PLAYERS, 1).insertCheckboxes();
-  sheet.getRange(7, 3, MAX_PLAYERS, 5).insertCheckboxes(); // G1, G2, G3, Rest P, Rest C
+  sheet.getRange(7, 3, MAX_PLAYERS, 5).insertCheckboxes(); // Rest P, Rest C, G1, G2, G3
   const checkVals = [];
   const nameVals = [];
-  const gameRestVals = [];
+  const extraVals = []; // Rest P, Rest C, G1, G2, G3
   for (let i = 0; i < MAX_PLAYERS; i++) {
     const hasPlayer = i < players.length && players[i];
     checkVals.push([hasPlayer ? true : false]);
     nameVals.push([hasPlayer ? players[i] : '']);
-    gameRestVals.push([hasPlayer ? true : false, false, false, false, false]); // G1=true, G2=false, G3=false, Rest P=false, Rest C=false
+    extraVals.push([false, false, hasPlayer ? true : false, false, false]);
   }
   sheet.getRange(7, 1, MAX_PLAYERS, 1).setValues(checkVals);
   sheet.getRange(7, 2, MAX_PLAYERS, 1).setValues(nameVals).setFontSize(11);
-  sheet.getRange(7, 3, MAX_PLAYERS, 5).setValues(gameRestVals);
+  sheet.getRange(7, 3, MAX_PLAYERS, 5).setValues(extraVals);
 
-  // Gray out G2 and G3 initially (Games defaults to 1) — don't hide columns since output rows need them
-  sheet.getRange('D6').setFontColor('#cccccc');
-  sheet.getRange('E6').setFontColor('#cccccc');
-  sheet.getRange(7, 4, MAX_PLAYERS, 2).setFontColor('#cccccc'); // gray out G2/G3 checkboxes
+  // Hide G1/G2/G3 columns when Games=1 (default) — they're redundant with the master checkbox
+  // G1 (col E), G2 (col F), G3 (col G) are all hidden initially; shown when Games > 1
+  sheet.showColumns(3); sheet.showColumns(4); // ensure Rest P/C visible
+  sheet.hideColumns(5); // G1
+  sheet.hideColumns(6); // G2
+  sheet.hideColumns(7); // G3
 
   // Lineup Card area (row 20+) — combined view written dynamically by suggestLineup()
   const lineupStartRow = 7 + MAX_PLAYERS + 1; // row 20
@@ -1182,11 +1185,11 @@ function suggestLineup() {
     return;
   }
 
-  const games = Number(suggesterSheet.getRange('G4').getValue()) || 1;
+  const games = Number(suggesterSheet.getRange('D4').getValue()) || 1;
 
-  // Read player data: col A=master checkbox, B=name, C=G1, D=G2, E=G3, F=Rest P, G=Rest C
+  // Read player data: col A=master checkbox, B=name, C=Rest P, D=Rest C, E=G1, F=G2, G=G3
   const checkData = suggesterSheet.getRange(7, 1, MAX_PLAYERS, 2).getValues();
-  const gameRestData = suggesterSheet.getRange(7, 3, MAX_PLAYERS, 5).getValues(); // G1,G2,G3,RestP,RestC
+  const extraData = suggesterSheet.getRange(7, 3, MAX_PLAYERS, 5).getValues(); // RestP,RestC,G1,G2,G3
 
   // Build per-game available players and rest flags
   const perGameAvailable = []; // perGameAvailable[g] = [playerNames]
@@ -1201,14 +1204,22 @@ function suggestLineup() {
   for (let i = 0; i < MAX_PLAYERS; i++) {
     if (!checkData[i][0] || !checkData[i][1]) continue;
     const name = checkData[i][1];
-    restFlags[name] = { P: !!gameRestData[i][3], C: !!gameRestData[i][4] };
+    restFlags[name] = { P: !!extraData[i][0], C: !!extraData[i][1] }; // cols 0=Rest P, 1=Rest C
 
-    for (let g = 0; g < games; g++) {
-      if (gameRestData[i][g]) { // cols 0=G1, 1=G2, 2=G3
-        perGameAvailable[g].push(name);
-        if (!allAvailableSet.has(name)) {
-          allAvailableSet.add(name);
-          allAvailablePlayers.push(name);
+    if (games === 1) {
+      // Single game: master checkbox is the only attendance control
+      perGameAvailable[0].push(name);
+      allAvailableSet.add(name);
+      allAvailablePlayers.push(name);
+    } else {
+      // Multi-game: use G1/G2/G3 columns (indices 2,3,4)
+      for (let g = 0; g < games; g++) {
+        if (extraData[i][2 + g]) { // index 2=G1, 3=G2, 4=G3
+          perGameAvailable[g].push(name);
+          if (!allAvailableSet.has(name)) {
+            allAvailableSet.add(name);
+            allAvailablePlayers.push(name);
+          }
         }
       }
     }
@@ -2051,30 +2062,34 @@ function onEdit(e) {
     updateDepthChartDropdowns();
   }
 
-  // Watch Games input on Lineup Suggester (cell G4) to enable/disable G2/G3 columns
-  if (sheet.getName() === 'Lineup Suggester' && e.range.getRow() === 4 && e.range.getColumn() === 7) {
+  // Watch Games input on Lineup Suggester (cell D4) to show/hide per-game columns
+  // Layout: C=Rest P, D=Rest C, E=G1, F=G2, G=G3
+  if (sheet.getName() === 'Lineup Suggester' && e.range.getRow() === 4 && e.range.getColumn() === 4) {
     const games = Number(e.range.getValue());
-    // Read G1 column to use as default for newly enabled game columns
-    const g1Values = sheet.getRange(7, 3, MAX_PLAYERS, 1).getValues();
-    if (games >= 2) {
-      // Enable G2: set font to black and default attendance to match G1
-      sheet.getRange('D6').setFontColor(null);
-      const g2Values = g1Values.map(row => [row[0]]);
-      sheet.getRange(7, 4, MAX_PLAYERS, 1).setValues(g2Values).setFontColor(null);
+    // Read master checkbox (col A) to default G1/G2/G3 attendance
+    const masterValues = sheet.getRange(7, 1, MAX_PLAYERS, 1).getValues();
+    if (games === 1) {
+      // Single game: hide all game columns, master checkbox = attendance
+      sheet.hideColumns(5); // G1
+      sheet.hideColumns(6); // G2
+      sheet.hideColumns(7); // G3
     } else {
-      // Gray out G2
-      sheet.getRange('D6').setFontColor('#cccccc');
-      sheet.getRange(7, 4, MAX_PLAYERS, 1).setFontColor('#cccccc');
-    }
-    if (games >= 3) {
-      // Enable G3: set font to black and default attendance to match G1
-      sheet.getRange('E6').setFontColor(null);
-      const g3Values = g1Values.map(row => [row[0]]);
-      sheet.getRange(7, 5, MAX_PLAYERS, 1).setValues(g3Values).setFontColor(null);
-    } else {
-      // Gray out G3
-      sheet.getRange('E6').setFontColor('#cccccc');
-      sheet.getRange(7, 5, MAX_PLAYERS, 1).setFontColor('#cccccc');
+      // Multi-game: show G1 + relevant game columns, default to master checkbox
+      sheet.showColumns(5); // G1
+      const g1Vals = masterValues.map(row => [row[0]]);
+      sheet.getRange(7, 5, MAX_PLAYERS, 1).setValues(g1Vals);
+      if (games >= 2) {
+        sheet.showColumns(6); // G2
+        sheet.getRange(7, 6, MAX_PLAYERS, 1).setValues(g1Vals);
+      } else {
+        sheet.hideColumns(6);
+      }
+      if (games >= 3) {
+        sheet.showColumns(7); // G3
+        sheet.getRange(7, 7, MAX_PLAYERS, 1).setValues(g1Vals);
+      } else {
+        sheet.hideColumns(7);
+      }
     }
   }
 }
@@ -2085,32 +2100,31 @@ function updateSuggesterNames() {
   if (!sheet) return;
 
   const players = getRosterNames();
-  // Read existing checkboxes, names, and 5 checkbox columns (G1, G2, G3, Rest P, Rest C)
+  // Read existing: col A=checkbox, B=name, C=Rest P, D=Rest C, E=G1, F=G2, G=G3
   const existingChecks = sheet.getRange(7, 1, MAX_PLAYERS, 1).getValues();
   const existingNames = sheet.getRange(7, 2, MAX_PLAYERS, 1).getValues();
-  const existingGameRest = sheet.getRange(7, 3, MAX_PLAYERS, 5).getValues();
+  const existingExtra = sheet.getRange(7, 3, MAX_PLAYERS, 5).getValues();
 
   const checkValues = [];
   const nameValues = [];
-  const gameRestValues = [];
+  const extraValues = [];
   for (let i = 0; i < MAX_PLAYERS; i++) {
     if (i < players.length) {
-      // Preserve checkbox state if the name hasn't changed; default to true for new names
       const nameChanged = existingNames[i][0] !== players[i];
       checkValues.push([nameChanged ? true : existingChecks[i][0]]);
       nameValues.push([players[i]]);
       if (nameChanged) {
-        gameRestValues.push([true, false, false, false, false]); // G1=true, G2/G3/RestP/RestC=false
+        extraValues.push([false, false, true, false, false]); // RestP=f, RestC=f, G1=true, G2=f, G3=f
       } else {
-        gameRestValues.push([existingGameRest[i][0], existingGameRest[i][1], existingGameRest[i][2], existingGameRest[i][3], existingGameRest[i][4]]);
+        extraValues.push([existingExtra[i][0], existingExtra[i][1], existingExtra[i][2], existingExtra[i][3], existingExtra[i][4]]);
       }
     } else {
       checkValues.push([false]);
       nameValues.push(['']);
-      gameRestValues.push([false, false, false, false, false]);
+      extraValues.push([false, false, false, false, false]);
     }
   }
   sheet.getRange(7, 1, MAX_PLAYERS, 1).setValues(checkValues);
   sheet.getRange(7, 2, MAX_PLAYERS, 1).setValues(nameValues);
-  sheet.getRange(7, 3, MAX_PLAYERS, 5).setValues(gameRestValues);
+  sheet.getRange(7, 3, MAX_PLAYERS, 5).setValues(extraValues);
 }
