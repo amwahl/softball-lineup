@@ -1546,11 +1546,17 @@ function updateSuggesterNames() {
   if (!sheet) return;
 
   const players = getRosterNames();
+  // Read existing checkboxes and names to preserve user selections
+  const existingChecks = sheet.getRange(7, 1, MAX_PLAYERS, 1).getValues();
+  const existingNames = sheet.getRange(7, 2, MAX_PLAYERS, 1).getValues();
+
   const checkValues = [];
   const nameValues = [];
   for (let i = 0; i < MAX_PLAYERS; i++) {
     if (i < players.length) {
-      checkValues.push([true]);
+      // Preserve checkbox state if the name hasn't changed; default to true for new names
+      const nameChanged = existingNames[i][0] !== players[i];
+      checkValues.push([nameChanged ? true : existingChecks[i][0]]);
       nameValues.push([players[i]]);
     } else {
       checkValues.push([false]);
