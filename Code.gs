@@ -1631,67 +1631,78 @@ function createHowToUseSheet(ss) {
   if (sheet) sheet.clear(); else sheet = ss.insertSheet('How To Use');
 
   const instructions = [
-    ['⚾ SOFTBALL LINEUP MANAGER - Instructions', ''],
-    ['', ''],
-    ['FINDING THE MENU', ''],
+    ['⚾ SOFTBALL LINEUP MANAGER - Instructions', ''],   // 1
+    ['', ''],                                              // 2
+    ['FINDING THE MENU', ''],                              // 3
     ['Look for ⚾ Softball in the menu bar', 'It appears at the far right end, after Extensions and Help'],
     ['First time setup:', 'Go to Extensions > Apps Script, select onOpen, click Run (▶), and authorize when prompted'],
     ['If you don\'t see it after that', 'Close and reopen the spreadsheet — the menu loads automatically on each open'],
-    ['', ''],
-    ['GETTING STARTED', ''],
+    ['', ''],                                              // 7
+    ['GETTING STARTED', ''],                               // 8
     ['1. Go to the Roster sheet', 'Enter your players\' names (up to 12 players)'],
     ['2. Set position preferences', 'For each player, set each position as Preferred (green), Okay (yellow), or Restricted (red)'],
     ['3. That\'s it!', 'You\'re ready to manage games'],
-    ['', ''],
-    ['ENTERING A GAME', ''],
+    ['', ''],                                              // 12
+    ['ENTERING A GAME', ''],                               // 13
     ['1. Go to the Game Entry sheet', 'Fill in the date, opponent, and number of innings'],
     ['2. Mark attendance', 'Uncheck absent players using the checkboxes in the left sidebar'],
     ['3. Fill in the lineup grid', 'Use dropdowns to assign one player per position per inning'],
-    ['4. Mark who sat out', 'Use the Sat Out columns (up to 3 players can sit out per inning)'],
+    ['4. Mark who sat out', 'Use the Sit Out columns (up to 3 players can sit out per inning)'],
     ['5. Enter batting stats (below lineup)', 'Fill in AB, hits (1B/2B/3B/HR), BB, SB, and CS for each player'],
-    ['6. Save the game', 'Click ⚾ Softball (far right of menu bar) > Save Game (saves both lineup and batting stats)'],
-    ['', ''],
-    ['DEPTH CHART', ''],
+    ['6. Save the game', 'Click ⚾ Softball > Save Game — validates for errors before saving'],
+    ['', ''],                                              // 20
+    ['SAVE GAME VALIDATION', ''],                          // 21
+    ['The system checks before saving:', 'Duplicate players in one inning and absent players in the lineup are blocked'],
+    ['If you see an error:', 'Fix the issue on the Game Entry sheet and save again'],
+    ['', ''],                                              // 24
+    ['DELETING A GAME', ''],                               // 25
+    ['Click ⚾ Softball > Delete Last Game', 'Removes the most recent game from Season History and Batting Stats'],
+    ['Confirm the deletion', 'The game number and opponent are shown — this cannot be undone'],
+    ['', ''],                                              // 28
+    ['DEPTH CHART', ''],                                   // 29
     ['1. Go to the Depth Chart sheet', 'Rank players per position (1st = top choice, leave blank for unranked)'],
     ['2. Fill in rankings', 'Use the dropdowns to select which player is your 1st, 2nd, 3rd choice, etc. at each position'],
     ['3. How it works', 'Ranked players get a scoring bonus when the Lineup Suggester assigns positions'],
     ['4. Interaction with preferences', 'Restricted still blocks a player even if ranked 1st. Depth chart fine-tunes choices among Preferred/Okay players'],
-    ['', ''],
-    ['USING THE LINEUP SUGGESTER', ''],
+    ['', ''],                                              // 34
+    ['USING THE LINEUP SUGGESTER', ''],                    // 35
     ['1. Go to the Lineup Suggester sheet', 'Check the boxes next to available players'],
     ['2. Rest P / Rest C columns', 'Check these to hold a player back from Pitcher or Catcher for this game (great for friendlies or resting arms)'],
     ['3. Set the number of innings', ''],
-    ['4. Click ⚾ Softball (far right of menu bar) > Suggest Lineup', 'The algorithm will generate field positions AND a batting order'],
+    ['4. Click ⚾ Softball > Suggest Lineup', 'The algorithm will generate field positions AND a batting order'],
     ['5. Review the output', 'Sit-out cap and relief pitcher suggestion are shown below the lineup grid'],
-    ['6. Edit if needed', 'Use dropdowns to make manual adjustments to field positions'],
+    ['6. Edit if needed', 'Use dropdowns to make manual adjustments to field positions and sit-outs'],
     ['7. Batting order section', 'Shows suggested batting order based on OBP, slugging, and speed stats'],
-    ['8. Copy to Game Entry', 'Transfer the final lineup to the Game Entry sheet for the actual game'],
-    ['', ''],
-    ['UNDERSTANDING THE BATTING ORDER', ''],
+    ['8. Copy to Game Entry', 'Sit-out columns match Game Entry layout for easy copy-paste'],
+    ['', ''],                                              // 44
+    ['UNDERSTANDING THE BATTING ORDER', ''],               // 45
     ['Spots 1-3 (top of order):', 'Best OBP + speed — players who get on base and steal'],
     ['Spots 4-6 (middle):', 'Best slugging — power hitters who drive in runs'],
     ['Spots 7+ (bottom):', 'Remaining players by overall composite score'],
     ['Stability:', 'Players move at most 2 spots from their recent average position'],
     ['New players (< 3 games):', 'Default to roster order until enough data is collected'],
-    ['', ''],
-    ['VIEWING THE DASHBOARD', ''],
-    ['1. Go to the Dashboard sheet', 'Click ⚾ Softball (far right of menu bar) > Refresh Dashboard to update stats'],
+    ['', ''],                                              // 51
+    ['VIEWING THE DASHBOARD', ''],                         // 52
+    ['1. Go to the Dashboard sheet', 'Click ⚾ Softball > Refresh Dashboard to update stats'],
     ['2. Section 1: Innings at Each Position', 'Shows total innings each player has played at each position all season'],
     ['3. Section 2: Games Since Last Played', 'Yellow = 3+ games since, Red = 5+ games since playing that position'],
     ['4. Section 3: Batting Stats', 'Shows OBP, SLG, stolen bases, and caught stealing for each player'],
-    ['', ''],
-    ['TIPS', ''],
+    ['', ''],                                              // 57
+    ['TIPS', ''],                                          // 58
     ['• Sit-out cap:', 'No player sits out more than their fair share per game — the cap is shown in the lineup output'],
     ['• Field position rotation:', 'Players rotate across field positions — the algorithm penalizes staying at the same non-P/C spot for 3+ innings'],
+    ['• Outfield-only avoidance:', 'Players who have only played outfield for 2+ innings get a bonus toward infield positions'],
     ['• No-return rule for P (hard):', 'Once a player leaves Pitcher, they cannot return to that position later in the game'],
     ['• No-return rule for C (soft):', 'Once a player leaves Catcher, the algorithm strongly avoids putting them back but will allow it if needed'],
     ['• Bullpen warmup:', 'The algorithm prefers pitchers who sat out the previous inning to warm up, but will assign one without warmup if needed'],
     ['• Relief pitcher:', 'A suggested relief pitcher is shown below the lineup in case the starter needs to come out'],
     ['• Rest P / Rest C:', 'Use these checkboxes on the Lineup Suggester to rest key players from P or C for specific games'],
     ['• Absent players:', 'Uncheck on Game Entry before saving — they are excluded from season history and don\'t affect recency scoring'],
+    ['• Delete Last Game:', 'Use ⚾ Softball > Delete Last Game to undo the most recently saved game'],
     ['• Dashboard colors:', 'Yellow = 3+ games since, Red = 5+ games since playing a position'],
     ['• Season History sheet:', 'Stores all game data — don\'t edit directly unless fixing errors'],
     ['• Batting Stats sheet:', 'Stores per-game batting data — editable to fix errors, then Refresh Dashboard'],
+    ['• Updating the code:', 'Paste new Code.gs, save, then run rebuildGameEntry and initializeStep2 — your data is preserved'],
   ];
 
   sheet.getRange(1, 1, instructions.length, 2).setValues(instructions);
@@ -1702,7 +1713,7 @@ function createHowToUseSheet(ss) {
   // Bold column A for all rows (step numbers and bullets will be bold)
   sheet.getRange(1, 1, instructions.length, 1).setFontWeight('bold');
   // Section header rows
-  const sectionRows = [3, 8, 13, 21, 27, 37, 43, 48];
+  const sectionRows = [3, 8, 13, 21, 25, 29, 35, 45, 52, 58];
   sectionRows.forEach(row => {
     if (row <= instructions.length) {
       sheet.getRange(row, 1, 1, 2).setFontSize(13).setBackground('#e8f0fe');

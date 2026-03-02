@@ -10,6 +10,7 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - **Lineup Suggester** — Auto-generate balanced field lineups with rest options, relief pitcher suggestions, and fair sit-out rotation
 - **Batting Order** — Suggest optimal batting orders based on OBP, slugging, and speed stats
 - **Season Dashboard** — View innings at each position, recency tracking, and cumulative batting stats
+- **Delete Last Game** — Undo a saved game if entered incorrectly
 
 ## Quick Setup (5 minutes)
 
@@ -28,7 +29,7 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
    - Click the **Run** button (▶)
    - When prompted, click **Review Permissions** > choose your Google account > **Allow**
    - This grants the script permission to modify your spreadsheet
-   - **Re-running is safe:** Initialize All Sheets preserves your existing roster names and preferences
+   - **Re-running is safe:** Initialize All Sheets preserves your existing roster names, preferences, and depth chart rankings
 
 5. **Return to your spreadsheet**
    - You'll see a new **⚾ Softball** menu at the far right of the menu bar (after Extensions and Help)
@@ -68,6 +69,7 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - **Bullpen warmup (soft):** The algorithm prefers pitchers who sat out the previous inning to warm up, but will assign an available pitcher without warmup if needed
 - **P/C continuity:** Pitcher and Catcher get a stronger continuity bonus than field positions, since leaving is permanent
 - **Field position rotation:** Players get a small bonus for a 2nd consecutive inning at the same position, but a growing penalty for 3+ innings to encourage rotation across the field
+- **Outfield-only avoidance:** Players who have only played outfield (LF/CF/RF) for 2+ innings get a bonus toward infield positions to mix things up
 - **Sit-out cap:** No player sits out more than their fair share — the cap is calculated as `ceil(total sit-out slots / players)`, so with 12 players and 5 innings, no one sits more than 2
 - Sit-outs rotate fairly — avoids consecutive sit-outs for the same player, and proactively sits out the next depth-chart pitcher to enable warmup
 - **Relief pitcher:** The output suggests a relief pitcher from the depth chart in case the starter needs to come out
@@ -101,6 +103,22 @@ The Game Entry sheet is organized top to bottom:
 2. **Attendance** (rows 5-17) — Checkbox + player name for each roster player; uncheck absent players
 3. **Lineup grid** (rows 19-28) — Position assignments and sit-outs per inning
 4. **Batting stats** (rows 30+) — Per-player at-bats, hits, walks, steals
+
+## Save Game Validation
+
+When you click Save Game, the system checks for errors before saving:
+
+- **Duplicate players** — If the same player appears in multiple positions in one inning, the save is blocked with a specific error message
+- **Absent players in lineup** — If a player marked absent (unchecked attendance) is assigned to a position, the save is blocked
+- Fix the errors and save again
+
+## Deleting a Game
+
+If you saved a game with errors:
+
+1. Click **⚾ Softball > Delete Last Game**
+2. Confirm the game number and opponent
+3. The game is removed from Season History and Batting Stats, and the Dashboard is refreshed
 
 ## Updating the Code
 
