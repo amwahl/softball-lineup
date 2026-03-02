@@ -7,6 +7,14 @@ const MAX_PLAYERS = 12;
 const PREF_OPTIONS = ['Preferred', 'Okay', 'Restricted'];
 const BATTING_STATS = 'Batting Stats';
 
+// Game Entry layout constants (single source of truth for row offsets)
+const GE_ATTEND_ROW = 5;          // Attendance header row
+const GE_ATTEND_DATA = 6;         // First attendance checkbox row (GE_ATTEND_ROW + 1)
+const GE_GRID_HEADER = 19;        // Lineup grid header row (GE_ATTEND_ROW + MAX_PLAYERS + 2)
+const GE_GRID_DATA = 20;          // First lineup data row (GE_GRID_HEADER + 1)
+const GE_STATS_START = 30;        // Batting stats section header row (GE_GRID_DATA + 9 + 1)
+const GE_MAX_SIT_OUT = MAX_PLAYERS - POSITIONS.length; // typically 3
+
 // ============================================================
 // MENU & INITIALIZATION
 // ============================================================
@@ -18,6 +26,7 @@ function onOpen() {
     .addItem('Rebuild Game Entry', 'rebuildGameEntry')
     .addSeparator()
     .addItem('Save Game', 'saveGame')
+    .addItem('Delete Last Game', 'deleteLastGame')
     .addItem('Suggest Lineup', 'suggestLineup')
     .addItem('Refresh Dashboard', 'refreshDashboard')
     .addToUi();
@@ -156,9 +165,8 @@ function createGameEntrySheet(ss) {
   sheet.getRange('D1').setValue('← Fill in game details, then click ⚾ Softball (far right of the menu bar, after Help) > Save Game')
     .setFontColor('#666666').setFontStyle('italic');
 
-  // Attendance checkboxes (left sidebar, rows 5+)
-  const attendRow = 5;
-  sheet.getRange(attendRow, 1).setValue('Attendance')
+  // Attendance checkboxes (left sidebar)
+  sheet.getRange(GE_ATTEND_ROW, 1).setValue('Attendance')
     .setFontWeight('bold').setFontSize(12);
   const players = getRosterNames();
   const attendCheckVals = [];
@@ -167,36 +175,32 @@ function createGameEntrySheet(ss) {
     attendCheckVals.push([i < players.length && players[i] ? true : false]);
     attendNameVals.push([i < players.length && players[i] ? players[i] : '']);
   }
-  sheet.getRange(attendRow + 1, 1, MAX_PLAYERS, 1).insertCheckboxes();
-  sheet.getRange(attendRow + 1, 1, MAX_PLAYERS, 1).setValues(attendCheckVals);
-  sheet.getRange(attendRow + 1, 2, MAX_PLAYERS, 1).setValues(attendNameVals).setFontSize(11);
+  sheet.getRange(GE_ATTEND_DATA, 1, MAX_PLAYERS, 1).insertCheckboxes();
+  sheet.getRange(GE_ATTEND_DATA, 1, MAX_PLAYERS, 1).setValues(attendCheckVals);
+  sheet.getRange(GE_ATTEND_DATA, 2, MAX_PLAYERS, 1).setValues(attendNameVals).setFontSize(11);
 
-  // Lineup grid header (row after attendance section)
-  const gridHeaderRow = attendRow + MAX_PLAYERS + 2; // 5 + 12 + 2 = 19
-  const maxSitOut = MAX_PLAYERS - POSITIONS.length; // typically 3
+  // Lineup grid header
   const gridHeaders = ['Inning'];
   POSITIONS.forEach(p => gridHeaders.push(p));
-  for (let s = 1; s <= maxSitOut; s++) {
+  for (let s = 1; s <= GE_MAX_SIT_OUT; s++) {
     gridHeaders.push('Sit Out ' + s);
   }
-  sheet.getRange(gridHeaderRow, 1, 1, gridHeaders.length).setValues([gridHeaders])
+  sheet.getRange(GE_GRID_HEADER, 1, 1, gridHeaders.length).setValues([gridHeaders])
     .setFontWeight('bold')
     .setBackground('#1a73e8')
     .setFontColor('white')
     .setHorizontalAlignment('center');
 
   // Inning rows (max 9) - batch write
-  const gridDataRow = gridHeaderRow + 1;
   const inningNums = [[1],[2],[3],[4],[5],[6],[7],[8],[9]];
-  sheet.getRange(gridDataRow, 1, 9, 1).setValues(inningNums).setHorizontalAlignment('center').setFontWeight('bold');
+  sheet.getRange(GE_GRID_DATA, 1, 9, 1).setValues(inningNums).setHorizontalAlignment('center').setFontWeight('bold');
 
-  // Batting stats section (after lineup grid)
-  const statsStartRow = gridDataRow + 9 + 1; // after 9 inning rows + gap
-  sheet.getRange(statsStartRow, 1).setValue('Batting Stats')
+  // Batting stats section
+  sheet.getRange(GE_STATS_START, 1).setValue('Batting Stats')
     .setFontSize(13).setFontWeight('bold').setBackground('#e8f0fe');
 
   const statsHeaders = ['Player', 'AB', '1B', '2B', '3B', 'HR', 'BB', 'SB', 'CS'];
-  sheet.getRange(statsStartRow + 1, 1, 1, statsHeaders.length).setValues([statsHeaders])
+  sheet.getRange(GE_STATS_START + 1, 1, 1, statsHeaders.length).setValues([statsHeaders])
     .setFontWeight('bold')
     .setBackground('#fbbc04')
     .setFontColor('white')
@@ -209,13 +213,13 @@ function createGameEntrySheet(ss) {
     statsNames.push([i < players.length ? players[i] : '']);
     statsDefaults.push([0, 0, 0, 0, 0, 0, 0, 0]);
   }
-  sheet.getRange(statsStartRow + 2, 1, MAX_PLAYERS, 1).setValues(statsNames).setFontSize(11);
-  sheet.getRange(statsStartRow + 2, 2, MAX_PLAYERS, 8).setValues(statsDefaults).setHorizontalAlignment('center');
+  sheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 1).setValues(statsNames).setFontSize(11);
+  sheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 8).setValues(statsDefaults).setHorizontalAlignment('center');
 
   // Numeric validation for stat columns
   const numRule = SpreadsheetApp.newDataValidation()
     .requireNumberBetween(0, 99).setAllowInvalid(false).build();
-  sheet.getRange(statsStartRow + 2, 2, MAX_PLAYERS, 8).setDataValidation(numRule);
+  sheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 8).setDataValidation(numRule);
 
   sheet.setFrozenRows(3);
   updateGameEntryDropdowns();
@@ -228,39 +232,33 @@ function updateGameEntryDropdowns() {
 
   if (players.length === 0) return;
 
-  // Row calculations must match createGameEntrySheet layout
-  const attendRow = 5;
-  const gridDataRow = attendRow + MAX_PLAYERS + 2 + 1; // 20
-
-  // Set dropdowns for position cells - apply to entire range at once
+  // Set dropdowns for position cells
   const posRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(players, true)
     .setAllowInvalid(false)
     .build();
-  sheet.getRange(gridDataRow, 2, 9, POSITIONS.length).setDataValidation(posRule);
+  sheet.getRange(GE_GRID_DATA, 2, 9, POSITIONS.length).setDataValidation(posRule);
 
-  // Sat out columns - apply to all sit-out columns
-  const maxSitOut = MAX_PLAYERS - POSITIONS.length;
+  // Sat out columns
   const satOutRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(players, true)
     .setAllowInvalid(true)
     .build();
-  sheet.getRange(gridDataRow, POSITIONS.length + 2, 9, maxSitOut).setDataValidation(satOutRule);
-
-  // Update player names in batting stats and attendance sections
-  const statsStartRow = gridDataRow + 9 + 1;
+  sheet.getRange(GE_GRID_DATA, POSITIONS.length + 2, 9, GE_MAX_SIT_OUT).setDataValidation(satOutRule);
 
   // Update attendance names
   const attendNameVals = [];
   for (let i = 0; i < MAX_PLAYERS; i++) {
     attendNameVals.push([i < players.length ? players[i] : '']);
   }
-  sheet.getRange(attendRow + 1, 2, MAX_PLAYERS, 1).setValues(attendNameVals);
+  sheet.getRange(GE_ATTEND_DATA, 2, MAX_PLAYERS, 1).setValues(attendNameVals);
+
+  // Update batting stats names
   const nameValues = [];
   for (let i = 0; i < MAX_PLAYERS; i++) {
     nameValues.push([i < players.length ? players[i] : '']);
   }
-  sheet.getRange(statsStartRow + 2, 1, MAX_PLAYERS, 1).setValues(nameValues);
+  sheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 1).setValues(nameValues);
 }
 
 // ============================================================
@@ -336,18 +334,37 @@ function saveGame() {
   // Collect lineup data - batch read all game data at once
   const players = getRosterNames();
   const rows = [];
-  const maxSitOut = MAX_PLAYERS - POSITIONS.length;
-  const attendRow = 5;
-  const gridDataRow = attendRow + MAX_PLAYERS + 2 + 1; // 20
-  const gameData = gameSheet.getRange(gridDataRow, 2, 9, POSITIONS.length + maxSitOut).getValues();
+  const gameData = gameSheet.getRange(GE_GRID_DATA, 2, 9, POSITIONS.length + GE_MAX_SIT_OUT).getValues();
 
   // Read attendance checkboxes to identify absent players
-  const attendData = gameSheet.getRange(attendRow + 1, 1, MAX_PLAYERS, 1).getValues();
+  const attendData = gameSheet.getRange(GE_ATTEND_DATA, 1, MAX_PLAYERS, 1).getValues();
   const absentPlayers = new Set();
   for (let i = 0; i < players.length; i++) {
     if (players[i] && attendData[i][0] === false) {
       absentPlayers.add(players[i]);
     }
+  }
+
+  // Validate: check for duplicate players in same inning and absent players in lineup
+  const errors = [];
+  for (let inning = 1; inning <= innings; inning++) {
+    const inningData = gameData[inning - 1];
+    const seen = new Set();
+    for (let j = 0; j < POSITIONS.length; j++) {
+      const name = inningData[j];
+      if (!name || name.toString().trim() === '') continue;
+      if (seen.has(name)) {
+        errors.push('Inning ' + inning + ': ' + name + ' appears in multiple positions');
+      }
+      seen.add(name);
+      if (absentPlayers.has(name)) {
+        errors.push('Inning ' + inning + ': ' + name + ' is marked absent but assigned to ' + POSITIONS[j]);
+      }
+    }
+  }
+  if (errors.length > 0) {
+    ui.alert('Lineup Errors', errors.join('\n'), ui.ButtonSet.OK);
+    return;
   }
 
   for (let inning = 1; inning <= innings; inning++) {
@@ -364,7 +381,7 @@ function saveGame() {
 
       // Check sat out — check all sit-out columns or if not assigned any position
       let isSatOut = !POSITIONS.some((_, j) => inningData[j] === playerName);
-      for (let s = 0; s < maxSitOut; s++) {
+      for (let s = 0; s < GE_MAX_SIT_OUT; s++) {
         const satOutVal = (inningData[POSITIONS.length + s] || '').toString();
         if (satOutVal === playerName) isSatOut = true;
       }
@@ -386,17 +403,15 @@ function saveGame() {
   // Clear game entry for next use
   gameSheet.getRange('B1').clearContent();
   gameSheet.getRange('B2').clearContent();
-  const maxSitOutClear = MAX_PLAYERS - POSITIONS.length;
-  gameSheet.getRange(gridDataRow, 2, 9, POSITIONS.length + maxSitOutClear).clearContent();
+  gameSheet.getRange(GE_GRID_DATA, 2, 9, POSITIONS.length + GE_MAX_SIT_OUT).clearContent();
 
   // Reset attendance checkboxes to all checked
   const resetChecks = [];
   for (let i = 0; i < MAX_PLAYERS; i++) resetChecks.push([true]);
-  gameSheet.getRange(attendRow + 1, 1, MAX_PLAYERS, 1).setValues(resetChecks);
+  gameSheet.getRange(GE_ATTEND_DATA, 1, MAX_PLAYERS, 1).setValues(resetChecks);
 
   // Clear batting stats section
-  const statsStartRow = gridDataRow + 9 + 1;
-  gameSheet.getRange(statsStartRow + 2, 2, MAX_PLAYERS, 8).setValue(0);
+  gameSheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 8).setValue(0);
 
   // Refresh dashboard
   refreshDashboard();
@@ -408,11 +423,8 @@ function saveBattingStats(ss, gameSheet, gameNum, date, players) {
   const battingSheet = ss.getSheetByName(BATTING_STATS);
   if (!battingSheet) return;
 
-  const attendRow = 5;
-  const gridDataRow = attendRow + MAX_PLAYERS + 2 + 1;
-  const statsStartRow = gridDataRow + 9 + 1;
   // Batch read: player names (col 1) + stats (cols 2-9)
-  const statsData = gameSheet.getRange(statsStartRow + 2, 1, MAX_PLAYERS, 9).getValues();
+  const statsData = gameSheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 9).getValues();
 
   const battingRows = [];
   for (let i = 0; i < statsData.length; i++) {
@@ -448,6 +460,65 @@ function saveBattingStats(ss, gameSheet, gameNum, date, players) {
 }
 
 // ============================================================
+// DELETE LAST GAME
+// ============================================================
+
+function deleteLastGame() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ui = SpreadsheetApp.getUi();
+  const historySheet = ss.getSheetByName('Season History');
+  const battingSheet = ss.getSheetByName(BATTING_STATS);
+
+  if (!historySheet) {
+    ui.alert('Error', 'Season History sheet not found.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const historyData = historySheet.getDataRange().getValues();
+  if (historyData.length <= 1) {
+    ui.alert('No Games', 'There are no saved games to delete.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Find the max game number
+  let maxGame = 0;
+  for (let i = 1; i < historyData.length; i++) {
+    if (historyData[i][0] > maxGame) maxGame = historyData[i][0];
+  }
+
+  // Get opponent for confirmation
+  let opponent = '';
+  for (let i = 1; i < historyData.length; i++) {
+    if (historyData[i][0] === maxGame) { opponent = historyData[i][2]; break; }
+  }
+
+  const response = ui.alert('Delete Last Game',
+    'Delete Game #' + maxGame + ' vs ' + opponent + '?\n\nThis cannot be undone.',
+    ui.ButtonSet.YES_NO);
+  if (response !== ui.Button.YES) return;
+
+  // Delete from Season History (bottom-up to preserve row indices)
+  for (let i = historyData.length - 1; i >= 1; i--) {
+    if (historyData[i][0] === maxGame) {
+      historySheet.deleteRow(i + 1);
+    }
+  }
+
+  // Delete from Batting Stats
+  if (battingSheet) {
+    const battingData = battingSheet.getDataRange().getValues();
+    for (let i = battingData.length - 1; i >= 1; i--) {
+      if (battingData[i][0] === maxGame) {
+        battingSheet.deleteRow(i + 1);
+      }
+    }
+  }
+
+  refreshDashboard();
+  ui.alert('Deleted', 'Game #' + maxGame + ' vs ' + opponent + ' has been deleted.\nDashboard has been refreshed.', ui.ButtonSet.OK);
+}
+
+// ============================================================
 // BATTING STATS COMPUTATION
 // ============================================================
 
@@ -468,14 +539,19 @@ function computeBattingAverages() {
 
     if (!playerStats[player]) {
       playerStats[player] = {
-        games: 0, ab: 0, singles: 0, doubles: 0, triples: 0, hr: 0,
+        gameNums: new Set(), ab: 0, singles: 0, doubles: 0, triples: 0, hr: 0,
         bb: 0, sb: 0, cs: 0,
         recentPositions: [] // [{gameNum, pos}] for stability calc
       };
     }
 
     const s = playerStats[player];
-    s.games++;
+    const gameNum = data[i][0];
+
+    // Skip duplicate rows (same player + game number)
+    if (s.gameNums.has(gameNum)) continue;
+    s.gameNums.add(gameNum);
+
     s.ab += data[i][3] || 0;
     s.singles += data[i][4] || 0;
     s.doubles += data[i][5] || 0;
@@ -507,7 +583,7 @@ function computeBattingAverages() {
       : 0;
 
     averages[player] = {
-      games: s.games,
+      games: s.gameNums.size,
       ab: s.ab,
       hits: hits,
       obp: obp,
@@ -714,6 +790,13 @@ function refreshDashboard() {
   const players = getRosterNames();
   if (players.length === 0) return;
 
+  // Clear all data rows to prevent stale data from removed players
+  const sec2StartRow = 5 + MAX_PLAYERS + 2;
+  const sec3StartRow = sec2StartRow + MAX_PLAYERS + 3;
+  dashboard.getRange(6, 1, MAX_PLAYERS, POSITIONS.length + 3).clearContent().setBackground(null);
+  dashboard.getRange(sec2StartRow + 2, 1, MAX_PLAYERS, POSITIONS.length + 1).clearContent().setBackground(null);
+  dashboard.getRange(sec3StartRow + 2, 1, MAX_PLAYERS, 8).clearContent();
+
   const historyData = historySheet.getDataRange().getValues();
   if (historyData.length <= 1) return;
 
@@ -859,7 +942,17 @@ function refreshDashboard() {
 
 function createDepthChartSheet(ss) {
   let sheet = ss.getSheetByName('Depth Chart');
-  if (sheet) sheet.clear(); else sheet = ss.insertSheet('Depth Chart');
+
+  // Preserve existing depth chart rankings before clearing
+  let existingData = null;
+  if (sheet) {
+    const data = sheet.getRange(5, 2, MAX_PLAYERS, POSITIONS.length).getValues();
+    const hasData = data.some(row => row.some(cell => cell && cell.toString().trim() !== ''));
+    if (hasData) existingData = data;
+    sheet.clear();
+  } else {
+    sheet = ss.insertSheet('Depth Chart');
+  }
 
   // Title
   sheet.getRange('A1').setValue('Depth Chart')
@@ -899,6 +992,11 @@ function createDepthChartSheet(ss) {
   sheet.setColumnWidth(1, 60);
   for (let c = 2; c <= POSITIONS.length + 1; c++) {
     sheet.setColumnWidth(c, 120);
+  }
+
+  // Restore existing depth chart rankings if preserved
+  if (existingData) {
+    sheet.getRange(5, 2, MAX_PLAYERS, POSITIONS.length).setValues(existingData);
   }
 
   sheet.setFrozenRows(4);
