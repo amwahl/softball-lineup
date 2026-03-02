@@ -1516,6 +1516,15 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
         }
       }
 
+      // Minimum 2-inning starter rule for P and C:
+      // In inning 1 (second inning), heavily penalize changing the starter
+      if (score < 10000 && (j === 0 || j === 1) && currentInning === 1) {
+        const starterAtPos = previousInnings[0][j];
+        if (playerName !== starterAtPos) {
+          score += 500; // very strong penalty — keep the starter for at least 2 innings
+        }
+      }
+
       // Skip all bonuses if already blocked (Restricted or no-return rule)
       if (score < 10000) {
         if (pref === 'Preferred') {
