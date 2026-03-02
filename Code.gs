@@ -6,6 +6,7 @@ const POSITIONS = ['P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'];
 const MAX_PLAYERS = 12;
 const PREF_OPTIONS = ['Preferred', 'Okay', 'Restricted'];
 const BATTING_STATS = 'Batting Stats';
+const MAX_GAMES = 3;
 
 // Game Entry layout constants (single source of truth for row offsets)
 const GE_ATTEND_ROW = 5;          // Attendance header row
@@ -736,6 +737,35 @@ function generateBattingOrder(availablePlayers, battingAverages) {
   }));
 }
 
+// Shuffle batting order for variety across multi-game days.
+// Players stay roughly in their tier but can drift ~1 spot across tier boundaries.
+// Uses gameIndex as a seed for deterministic pseudo-random jitter.
+function shuffleBattingOrderByTier(order, gameIndex) {
+  // Seeded pseudo-random: simple LCG so same roster+gameIndex = same shuffle
+  let seed = gameIndex * 2654435761; // large odd multiplier
+  function nextRand() {
+    seed = (seed * 1664525 + 1013904223) & 0x7fffffff;
+    return seed / 0x7fffffff; // 0-1
+  }
+
+  // Add jitter to each player's position score: ±10% of lineup length
+  const jitterRange = Math.max(1, Math.round(order.length * 0.1));
+  const jittered = order.map((entry, idx) => {
+    const jitter = (nextRand() * 2 - 1) * jitterRange; // random between -jitterRange and +jitterRange
+    return { entry, sortKey: idx + jitter };
+  });
+
+  jittered.sort((a, b) => a.sortKey - b.sortKey);
+
+  return jittered.map((item, idx) => ({
+    name: item.entry.name,
+    position: idx + 1,
+    obp: item.entry.obp,
+    slg: item.entry.slg,
+    sb: item.entry.sb
+  }));
+}
+
 // ============================================================
 // DASHBOARD SHEET
 // ============================================================
@@ -1035,27 +1065,44 @@ function createLineupSuggesterSheet(ss) {
     .requireNumberBetween(1, 9).setAllowInvalid(false).build();
   sheet.getRange('B4').setDataValidation(inningsVal);
 
-  // Player availability checkboxes with rest columns
+  sheet.getRange('F4').setValue('Games:').setFontWeight('bold');
+  sheet.getRange('G4').setValue(1);
+  const gamesList = [];
+  for (let g = 1; g <= MAX_GAMES; g++) gamesList.push(String(g));
+  const gamesVal = SpreadsheetApp.newDataValidation()
+    .requireValueInList(gamesList, true).setAllowInvalid(false).build();
+  sheet.getRange('G4').setDataValidation(gamesVal);
+
+  // Player availability checkboxes: A=checkbox, B=name, C=G1, D=G2, E=G3, F=Rest P, G=Rest C
   sheet.getRange('A6').setValue('Available Players:')
     .setFontWeight('bold').setFontSize(12);
-  sheet.getRange('C6').setValue('Rest P').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
-  sheet.getRange('D6').setValue('Rest C').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  sheet.getRange('C6').setValue('G1').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  sheet.getRange('D6').setValue('G2').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  sheet.getRange('E6').setValue('G3').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  sheet.getRange('F6').setValue('Rest P').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
+  sheet.getRange('G6').setValue('Rest C').setFontWeight('bold').setFontSize(10).setHorizontalAlignment('center');
 
   const players = getRosterNames();
   // Batch: insert checkboxes for entire range, then batch write values
   sheet.getRange(7, 1, MAX_PLAYERS, 1).insertCheckboxes();
-  sheet.getRange(7, 3, MAX_PLAYERS, 2).insertCheckboxes();
+  sheet.getRange(7, 3, MAX_PLAYERS, 5).insertCheckboxes(); // G1, G2, G3, Rest P, Rest C
   const checkVals = [];
   const nameVals = [];
-  const restVals = [];
+  const gameRestVals = [];
   for (let i = 0; i < MAX_PLAYERS; i++) {
-    checkVals.push([i < players.length && players[i] ? true : false]);
-    nameVals.push([i < players.length && players[i] ? players[i] : '']);
-    restVals.push([false, false]); // Rest P, Rest C — unchecked by default
+    const hasPlayer = i < players.length && players[i];
+    checkVals.push([hasPlayer ? true : false]);
+    nameVals.push([hasPlayer ? players[i] : '']);
+    gameRestVals.push([hasPlayer ? true : false, false, false, false, false]); // G1=true, G2=false, G3=false, Rest P=false, Rest C=false
   }
   sheet.getRange(7, 1, MAX_PLAYERS, 1).setValues(checkVals);
   sheet.getRange(7, 2, MAX_PLAYERS, 1).setValues(nameVals).setFontSize(11);
-  sheet.getRange(7, 3, MAX_PLAYERS, 2).setValues(restVals);
+  sheet.getRange(7, 3, MAX_PLAYERS, 5).setValues(gameRestVals);
+
+  // Gray out G2 and G3 initially (Games defaults to 1) — don't hide columns since output rows need them
+  sheet.getRange('D6').setFontColor('#cccccc');
+  sheet.getRange('E6').setFontColor('#cccccc');
+  sheet.getRange(7, 4, MAX_PLAYERS, 2).setFontColor('#cccccc'); // gray out G2/G3 checkboxes
 
   // Lineup Card area (row 20+) — combined view written dynamically by suggestLineup()
   const lineupStartRow = 7 + MAX_PLAYERS + 1; // row 20
@@ -1135,37 +1182,59 @@ function suggestLineup() {
     return;
   }
 
-  // Get available players and rest flags - batch read
-  const availablePlayers = [];
-  const restFlags = {}; // playerName -> { P: true/false, C: true/false }
+  const games = Number(suggesterSheet.getRange('G4').getValue()) || 1;
+
+  // Read player data: col A=master checkbox, B=name, C=G1, D=G2, E=G3, F=Rest P, G=Rest C
   const checkData = suggesterSheet.getRange(7, 1, MAX_PLAYERS, 2).getValues();
-  const restData = suggesterSheet.getRange(7, 3, MAX_PLAYERS, 2).getValues();
+  const gameRestData = suggesterSheet.getRange(7, 3, MAX_PLAYERS, 5).getValues(); // G1,G2,G3,RestP,RestC
+
+  // Build per-game available players and rest flags
+  const perGameAvailable = []; // perGameAvailable[g] = [playerNames]
+  const restFlags = {}; // playerName -> { P: bool, C: bool }
+  const allAvailablePlayers = []; // union across all games
+  const allAvailableSet = new Set();
+
+  for (let g = 0; g < games; g++) {
+    perGameAvailable.push([]);
+  }
+
   for (let i = 0; i < MAX_PLAYERS; i++) {
-    if (checkData[i][0] && checkData[i][1]) {
-      const name = checkData[i][1];
-      availablePlayers.push(name);
-      restFlags[name] = { P: !!restData[i][0], C: !!restData[i][1] };
+    if (!checkData[i][0] || !checkData[i][1]) continue;
+    const name = checkData[i][1];
+    restFlags[name] = { P: !!gameRestData[i][3], C: !!gameRestData[i][4] };
+
+    for (let g = 0; g < games; g++) {
+      if (gameRestData[i][g]) { // cols 0=G1, 1=G2, 2=G3
+        perGameAvailable[g].push(name);
+        if (!allAvailableSet.has(name)) {
+          allAvailableSet.add(name);
+          allAvailablePlayers.push(name);
+        }
+      }
     }
   }
 
-  if (availablePlayers.length < POSITIONS.length) {
-    ui.alert('Not Enough Players',
-      'You need at least ' + POSITIONS.length + ' available players to fill all positions. You have ' + availablePlayers.length + '.',
-      ui.ButtonSet.OK);
-    return;
+  // Validate minimum players per game
+  for (let g = 0; g < games; g++) {
+    if (perGameAvailable[g].length < POSITIONS.length) {
+      ui.alert('Not Enough Players',
+        'Game ' + (g + 1) + ': You need at least ' + POSITIONS.length + ' available players to fill all positions. You have ' + perGameAvailable[g].length + '.',
+        ui.ButtonSet.OK);
+      return;
+    }
   }
 
-  // Get position preferences from roster
+  // Get position preferences from roster (using allAvailablePlayers for union)
   const rosterData = rosterSheet.getRange(2, 2, MAX_PLAYERS, POSITIONS.length + 1).getValues();
   const preferences = {};
   for (let i = 0; i < rosterData.length; i++) {
     const name = rosterData[i][0];
-    if (name && availablePlayers.indexOf(name) >= 0) {
+    if (name && allAvailableSet.has(name)) {
       preferences[name] = {};
       for (let j = 0; j < POSITIONS.length; j++) {
         preferences[name][POSITIONS[j]] = rosterData[i][j + 1] || 'Okay';
       }
-      // Apply rest flags — override to Restricted for this game only
+      // Apply rest flags — override to Restricted
       if (restFlags[name]) {
         if (restFlags[name].P) preferences[name]['P'] = 'Restricted';
         if (restFlags[name].C) preferences[name]['C'] = 'Restricted';
@@ -1173,44 +1242,44 @@ function suggestLineup() {
     }
   }
 
-  // Validate that enough players can pitch and catch
-  const canPitch = availablePlayers.filter(p => preferences[p] && preferences[p]['P'] !== 'Restricted');
-  const canCatch = availablePlayers.filter(p => preferences[p] && preferences[p]['C'] !== 'Restricted');
+  // Warn about pitcher/catcher availability per game
   const warnings = [];
-  if (canPitch.length === 0) {
-    warnings.push('No players available to pitch! Check Rest P flags and roster restrictions.');
-  } else if (canPitch.length < 2) {
-    warnings.push('Only 1 player can pitch (' + canPitch[0] + '). Consider unchecking a Rest P flag for a backup.');
-  }
-  if (canCatch.length === 0) {
-    warnings.push('No players available to catch! Check Rest C flags and roster restrictions.');
-  } else if (canCatch.length < 2) {
-    warnings.push('Only 1 player can catch (' + canCatch[0] + '). Consider unchecking a Rest C flag for a backup.');
+  for (let g = 0; g < games; g++) {
+    const gLabel = games > 1 ? ' (Game ' + (g + 1) + ')' : '';
+    const canPitch = perGameAvailable[g].filter(p => preferences[p] && preferences[p]['P'] !== 'Restricted');
+    const canCatch = perGameAvailable[g].filter(p => preferences[p] && preferences[p]['C'] !== 'Restricted');
+    if (canPitch.length === 0) {
+      warnings.push('No players available to pitch' + gLabel + '!');
+    } else if (canPitch.length < 2) {
+      warnings.push('Only 1 player can pitch' + gLabel + ' (' + canPitch[0] + ').');
+    }
+    if (canCatch.length === 0) {
+      warnings.push('No players available to catch' + gLabel + '!');
+    } else if (canCatch.length < 2) {
+      warnings.push('Only 1 player can catch' + gLabel + ' (' + canCatch[0] + ').');
+    }
   }
   if (warnings.length > 0) {
     const proceed = ui.alert('Lineup Warning', warnings.join('\n') + '\n\nContinue anyway?', ui.ButtonSet.YES_NO);
     if (proceed !== ui.Button.YES) return;
   }
 
-  // Get history stats for recency scoring
-  // Uses per-player game counts so absent games don't inflate recency
+  // Get history stats for recency scoring (shared across all games)
   const gamesSinceAtPosition = {};
   if (historySheet) {
     const historyData = historySheet.getDataRange().getValues();
 
-    // First pass: collect each player's games in order
-    const playerGameList = {}; // playerName -> sorted array of game numbers
+    const playerGameList = {};
     for (let i = 1; i < historyData.length; i++) {
       const gameNum = historyData[i][0];
       const playerName = historyData[i][5];
-      if (availablePlayers.indexOf(playerName) < 0) continue;
+      if (!allAvailableSet.has(playerName)) continue;
       if (!playerGameList[playerName]) playerGameList[playerName] = new Set();
       playerGameList[playerName].add(gameNum);
     }
 
-    // Build game-number-to-player-ordinal maps
-    const playerGameIndex = {}; // playerName -> { gameNum -> ordinal (1-based) }
-    for (const name of availablePlayers) {
+    const playerGameIndex = {};
+    for (const name of allAvailablePlayers) {
       if (playerGameList[name]) {
         const sorted = Array.from(playerGameList[name]).sort((a, b) => a - b);
         playerGameIndex[name] = {};
@@ -1218,14 +1287,13 @@ function suggestLineup() {
       }
     }
 
-    // Second pass: find last game ordinal at each position per player
     const lastOrdinalAtPos = {};
     for (let i = 1; i < historyData.length; i++) {
       const gameNum = historyData[i][0];
       const playerName = historyData[i][5];
-      if (availablePlayers.indexOf(playerName) < 0) continue;
+      if (!allAvailableSet.has(playerName)) continue;
       if (!lastOrdinalAtPos[playerName]) lastOrdinalAtPos[playerName] = {};
-      const ordinal = playerGameIndex[playerName][gameNum];
+      const ordinal = playerGameIndex[playerName] ? playerGameIndex[playerName][gameNum] : 0;
 
       for (let j = 0; j < POSITIONS.length; j++) {
         if (historyData[i][6 + j] === 1) {
@@ -1236,7 +1304,7 @@ function suggestLineup() {
       }
     }
 
-    for (const name of availablePlayers) {
+    for (const name of allAvailablePlayers) {
       const totalGamesPlayed = playerGameList[name] ? playerGameList[name].size : 0;
       gamesSinceAtPosition[name] = {};
       for (const pos of POSITIONS) {
@@ -1249,10 +1317,10 @@ function suggestLineup() {
     }
   }
 
-  // Get depth chart rankings
+  // Get depth chart rankings (shared)
   const depthChart = getDepthChart();
 
-  // Also track how many total innings sat out historically per player
+  // Historical total sat out (shared, seeds crossGameSatOutCount)
   const totalSatOut = {};
   if (historySheet) {
     const historyData = historySheet.getDataRange().getValues();
@@ -1264,210 +1332,121 @@ function suggestLineup() {
     }
   }
 
-  // Generate lineup inning by inning
-  const lineup = []; // lineup[inning][posIndex] = playerName
-  const sitOuts = []; // sitOuts[inning] = [playerNames]
-  const inningCountThisGame = {}; // track innings played this game per player
-  availablePlayers.forEach(p => inningCountThisGame[p] = 0);
+  // Compute batting averages once
+  const battingAverages = computeBattingAverages();
 
-  for (let inning = 0; inning < innings; inning++) {
-    // Determine who sits out this inning
-    // Players with most innings played this game (and historically least sat out) sit out
-    const numSitOut = availablePlayers.length - POSITIONS.length;
-    const sittingOut = [];
+  // ── Game loop: generate lineups for each game ──
+  const crossGameSatOutCount = {};
+  allAvailablePlayers.forEach(p => crossGameSatOutCount[p] = totalSatOut[p] || 0);
 
-    if (numSitOut > 0) {
-      // Identify who sat out last inning (for consecutive avoidance)
-      const lastSitOuts = inning > 0 ? sitOuts[inning - 1] : [];
+  const allGamesLineups = [];  // [g] -> lineup[inning][posIndex]
+  const allGamesSitOuts = [];  // [g] -> sitOuts[inning]
+  const allGamesBatOrders = []; // [g] -> battingOrder[]
+  const allGamesSitOutCaps = []; // [g] -> sitOutCap number
+  const allGamesReliefPitchers = []; // [g] -> reliefPitcher name or null
 
-      // Pitcher-aware sit-out: find the next depth-chart pitcher who isn't
-      // currently pitching, so they can warm up for a future transition
-      let nextPitcher = null;
-      if (depthChart && depthChart['P'] && inning > 0) {
-        const currentPitcher = lineup[inning - 1][0];
-        for (const candidate of depthChart['P']) {
-          if (candidate !== currentPitcher && availablePlayers.indexOf(candidate) >= 0) {
-            // This player hasn't pitched yet or has been away from P —
-            // they're the most likely next pitcher
-            const hasLeftP = lineup.some((inn, k) => inn[0] === candidate) &&
-              lineup[inning - 1][0] !== candidate;
-            if (!hasLeftP) {
-              nextPitcher = candidate;
-              break;
+  for (let g = 0; g < games; g++) {
+    const availablePlayers = perGameAvailable[g];
+
+    // FRESH per-game state (resets no-return P/C, warmup, 2-inning start)
+    const lineup = [];
+    const sitOuts = [];
+    const inningCountThisGame = {};
+    availablePlayers.forEach(p => inningCountThisGame[p] = 0);
+
+    for (let inning = 0; inning < innings; inning++) {
+      const numSitOut = availablePlayers.length - POSITIONS.length;
+      const sittingOut = [];
+
+      if (numSitOut > 0) {
+        const lastSitOuts = inning > 0 ? sitOuts[inning - 1] : [];
+
+        // Pitcher-aware sit-out
+        let nextPitcher = null;
+        if (depthChart && depthChart['P'] && inning > 0) {
+          const currentPitcher = lineup[inning - 1][0];
+          for (const candidate of depthChart['P']) {
+            if (candidate !== currentPitcher && availablePlayers.indexOf(candidate) >= 0) {
+              const hasLeftP = lineup.some((inn, k) => inn[0] === candidate) &&
+                lineup[inning - 1][0] !== candidate;
+              if (!hasLeftP) {
+                nextPitcher = candidate;
+                break;
+              }
             }
+          }
+        }
+
+        // Per-game sit-out cap
+        const totalSitOutSlots = innings * numSitOut;
+        const maxSitOutPerPlayer = Math.ceil(totalSitOutSlots / availablePlayers.length);
+
+        // Sort by: most innings this game, then least cross-game sat out
+        const candidates = availablePlayers.slice().sort((a, b) => {
+          const inningDiff = inningCountThisGame[b] - inningCountThisGame[a];
+          if (inningDiff !== 0) return inningDiff;
+          return (crossGameSatOutCount[a] || 0) - (crossGameSatOutCount[b] || 0);
+        });
+
+        const sitOutsThisGame = {};
+        availablePlayers.forEach(p => {
+          sitOutsThisGame[p] = inning - inningCountThisGame[p];
+        });
+        const eligible = candidates.filter(c => sitOutsThisGame[c] < maxSitOutPerPlayer);
+        const pool = eligible.length >= numSitOut ? eligible : candidates;
+
+        const consecutive = [];
+        const nonConsecutive = [];
+        for (const c of pool) {
+          if (lastSitOuts.indexOf(c) >= 0) {
+            consecutive.push(c);
+          } else {
+            nonConsecutive.push(c);
+          }
+        }
+        const ordered = nonConsecutive.concat(consecutive);
+
+        for (let s = 0; s < numSitOut && s < ordered.length; s++) {
+          sittingOut.push(ordered[s]);
+        }
+
+        if (nextPitcher && sittingOut.indexOf(nextPitcher) < 0) {
+          const currentPitcher = inning > 0 ? lineup[inning - 1][0] : null;
+          const nextPitcherSitOuts = inning - inningCountThisGame[nextPitcher];
+          if (nextPitcher !== currentPitcher && nextPitcherSitOuts < maxSitOutPerPlayer) {
+            sittingOut[sittingOut.length - 1] = nextPitcher;
           }
         }
       }
 
-      // Calculate max sit-outs per player this game for fairness
-      // Distribute sit-outs as evenly as possible: ceil(total sit-out slots / players)
-      const totalSitOutSlots = innings * numSitOut;
-      const maxSitOutPerPlayer = Math.ceil(totalSitOutSlots / availablePlayers.length);
+      sitOuts.push(sittingOut);
 
-      // Sort by: most innings played this game first, then by least historical sat out
-      const candidates = availablePlayers.slice().sort((a, b) => {
-        // Primary: who has played the most innings this game
-        const inningDiff = inningCountThisGame[b] - inningCountThisGame[a];
-        if (inningDiff !== 0) return inningDiff;
-        // Secondary: who has sat out the least historically
-        return (totalSatOut[a] || 0) - (totalSatOut[b] || 0);
-      });
+      const playing = availablePlayers.filter(p => sittingOut.indexOf(p) < 0);
+      const assignment = assignPositions(playing, preferences, gamesSinceAtPosition, lineup, inning, depthChart, games);
+      lineup.push(assignment);
 
-      // Filter out players who have hit the per-game sit-out cap
-      const sitOutsThisGame = {};
-      availablePlayers.forEach(p => {
-        sitOutsThisGame[p] = inning - inningCountThisGame[p];
-      });
-      const eligible = candidates.filter(c => sitOutsThisGame[c] < maxSitOutPerPlayer);
-      // Fall back to full list if everyone has hit the cap (shouldn't happen with correct math)
-      const pool = eligible.length >= numSitOut ? eligible : candidates;
-
-      // Pick sit-outs, avoiding consecutive sit-outs when possible
-      const consecutive = [];
-      const nonConsecutive = [];
-      for (const c of pool) {
-        if (lastSitOuts.indexOf(c) >= 0) {
-          consecutive.push(c);
-        } else {
-          nonConsecutive.push(c);
-        }
-      }
-      // Prefer non-consecutive first, fall back to consecutive
-      const ordered = nonConsecutive.concat(consecutive);
-
-      for (let s = 0; s < numSitOut && s < ordered.length; s++) {
-        sittingOut.push(ordered[s]);
-      }
-
-      // Pitcher-aware: if the next pitcher isn't already sitting out and
-      // there's room to swap them in, replace the last (least priority) sit-out
-      if (nextPitcher && sittingOut.indexOf(nextPitcher) < 0) {
-        // Only swap if the next pitcher isn't the current pitcher
-        // and hasn't already hit the sit-out cap
-        const currentPitcher = inning > 0 ? lineup[inning - 1][0] : null;
-        const nextPitcherSitOuts = inning - inningCountThisGame[nextPitcher];
-        if (nextPitcher !== currentPitcher && nextPitcherSitOuts < maxSitOutPerPlayer) {
-          // Replace the last sit-out (lowest priority) with the next pitcher
-          sittingOut[sittingOut.length - 1] = nextPitcher;
-        }
-      }
+      playing.forEach(p => inningCountThisGame[p]++);
     }
 
-    sitOuts.push(sittingOut);
-
-    const playing = availablePlayers.filter(p => sittingOut.indexOf(p) < 0);
-
-    // Assign positions using a scoring system
-    const assignment = assignPositions(playing, preferences, gamesSinceAtPosition, lineup, inning, depthChart);
-    lineup.push(assignment);
-
-    // Update inning counts
-    playing.forEach(p => inningCountThisGame[p]++);
-  }
-
-  // Calculate sit-out cap for display
-  const numSitOut = availablePlayers.length - POSITIONS.length;
-  const sitOutCap = numSitOut > 0 ? Math.ceil(innings * numSitOut / availablePlayers.length) : 0;
-
-  // Row layout constants
-  const lineupStartRow = 7 + MAX_PLAYERS + 1; // row 20 — Lineup Card title
-  const fieldStartRow = lineupStartRow + MAX_PLAYERS + 5; // row 37 — Field Lineup title
-  const battingStartRow = fieldStartRow + 2 + 9 + 2; // Batting Order title
-
-  // Generate batting order first (needed for lineup card)
-  const battingAverages = computeBattingAverages();
-  const battingOrder = generateBattingOrder(availablePlayers, battingAverages);
-
-  // Build a lookup: playerName -> { obp, slg }
-  const statsLookup = {};
-  for (const entry of battingOrder) {
-    statsLookup[entry.name] = { obp: entry.obp, slg: entry.slg };
-  }
-
-  // ── Lineup Card (combined view) ──
-  // Clear previous lineup card area (title row already static, clear header + data + summary)
-  const cardCols = 2 + innings + 2; // #, Player, innings..., OBP, SLG
-  const cardClearRows = 1 + MAX_PLAYERS + 3; // header + data + summary rows
-  const cardClearRange = suggesterSheet.getRange(lineupStartRow + 1, 1, cardClearRows, Math.max(cardCols, 13));
-  cardClearRange.breakApart().clearContent().clearDataValidations().setBackground(null).setFontStyle(null).setFontWeight(null);
-
-  // Write lineup card header
-  const cardHeaders = ['#', 'Player'];
-  for (let i = 1; i <= innings; i++) cardHeaders.push('Inn ' + i);
-  cardHeaders.push('OBP', 'SLG');
-  suggesterSheet.getRange(lineupStartRow + 1, 1, 1, cardHeaders.length).setValues([cardHeaders])
-    .setFontWeight('bold').setBackground('#1a73e8').setFontColor('white').setHorizontalAlignment('center');
-
-  // Build card data rows: players in batting order
-  const cardData = [];
-  const cardBackgrounds = [];
-  for (let b = 0; b < battingOrder.length; b++) {
-    const playerName = battingOrder[b].name;
-    const row = [b + 1, playerName];
-    const bgRow = [null, null];
-
-    for (let inning = 0; inning < innings; inning++) {
-      // Find what position this player has in this inning
-      const posIndex = lineup[inning].indexOf(playerName);
-      if (posIndex >= 0) {
-        const pos = POSITIONS[posIndex];
-        row.push(pos);
-        if (preferences[playerName] && preferences[playerName][pos] === 'Preferred') {
-          bgRow.push('#b7e1cd'); // green for preferred
-        } else {
-          bgRow.push(null);
-        }
-      } else if (sitOuts[inning].indexOf(playerName) >= 0) {
-        row.push('OUT');
-        bgRow.push('#e0e0e0'); // gray for sit-out
-      } else {
-        row.push('');
-        bgRow.push(null);
-      }
+    // Accumulate sit-outs into crossGameSatOutCount
+    for (const p of availablePlayers) {
+      const sittingOutCount = innings - inningCountThisGame[p];
+      crossGameSatOutCount[p] = (crossGameSatOutCount[p] || 0) + sittingOutCount;
     }
 
-    // OBP, SLG
-    const stats = statsLookup[playerName] || { obp: 0, slg: 0 };
-    row.push(stats.obp > 0 ? stats.obp.toFixed(3) : '-');
-    row.push(stats.slg > 0 ? stats.slg.toFixed(3) : '-');
-    bgRow.push(null, null);
+    // Per-game sit-out cap for display
+    const numSitOut = availablePlayers.length - POSITIONS.length;
+    const sitOutCap = numSitOut > 0 ? Math.ceil(innings * numSitOut / availablePlayers.length) : 0;
 
-    cardData.push(row);
-    cardBackgrounds.push(bgRow);
-  }
-
-  let reliefPitcher = null;
-  if (cardData.length > 0) {
-    const cardRange = suggesterSheet.getRange(lineupStartRow + 2, 1, cardData.length, cardData[0].length);
-    cardRange.setValues(cardData);
-    cardRange.setBackgrounds(cardBackgrounds);
-    // Bold batting # column
-    suggesterSheet.getRange(lineupStartRow + 2, 1, cardData.length, 1).setHorizontalAlignment('center').setFontWeight('bold');
-    // Center inning + stat columns
-    suggesterSheet.getRange(lineupStartRow + 2, 3, cardData.length, innings + 2).setHorizontalAlignment('center');
-    // Player name font
-    suggesterSheet.getRange(lineupStartRow + 2, 2, cardData.length, 1).setFontSize(11);
-
-    // Position dropdowns on inning cells
-    const posValidation = SpreadsheetApp.newDataValidation()
-      .requireValueInList(POSITIONS.concat(['OUT', '']), true)
-      .setAllowInvalid(true)
-      .build();
-    suggesterSheet.getRange(lineupStartRow + 2, 3, cardData.length, innings).setDataValidation(posValidation);
-
-    // Summary rows below the card
-    let cardSummaryRow = lineupStartRow + 2 + cardData.length;
-
-    if (numSitOut > 0) {
-      suggesterSheet.getRange(cardSummaryRow, 1).setValue('Max sit-outs per player: ' + sitOutCap)
-        .setFontStyle('italic');
-      suggesterSheet.getRange(cardSummaryRow, 1, 1, 4).mergeAcross();
-      cardSummaryRow++;
+    // Per-game batting order — shuffle within tiers for games 2+
+    let battingOrder = generateBattingOrder(availablePlayers, battingAverages);
+    if (games > 1 && g > 0) {
+      battingOrder = shuffleBattingOrderByTier(battingOrder, g);
     }
 
-    // Suggest a relief pitcher
+    // Per-game relief pitcher
+    let reliefPitcher = null;
     const startingPitcher = lineup[0][0];
-    const pitchesAllGame = lineup.every(inn => inn[0] === startingPitcher);
     if (depthChart && depthChart['P']) {
       for (const candidate of depthChart['P']) {
         if (candidate === startingPitcher) continue;
@@ -1477,91 +1456,261 @@ function suggestLineup() {
         break;
       }
     }
+
+    allGamesLineups.push(lineup);
+    allGamesSitOuts.push(sitOuts);
+    allGamesBatOrders.push(battingOrder);
+    allGamesSitOutCaps.push(sitOutCap);
+    allGamesReliefPitchers.push(reliefPitcher);
+  }
+
+  // ── Output writing ──
+  const lineupStartRow = 7 + MAX_PLAYERS + 1; // row 20
+  const gameColors = ['#4285f4', '#34a853', '#fbbc04']; // blue, green, yellow
+  const gameTitleFontColors = ['white', 'white', '#333333'];
+
+  // Calculate generous clear area: enough for MAX_GAMES stacked outputs
+  const maxCardRows = games * (MAX_PLAYERS + 6) + 5;
+  const maxFieldRows = games * (11 + 3) + 5;
+  const maxBattingRows = games * (MAX_PLAYERS + 3) + 5;
+  const totalClearRows = maxCardRows + maxFieldRows + maxBattingRows + 10;
+  const clearCols = Math.max(2 + innings + 2, POSITIONS.length + 4, 13);
+
+  // Clear everything below the input section
+  const clearRange = suggesterSheet.getRange(lineupStartRow, 1, totalClearRows, clearCols);
+  clearRange.breakApart().clearContent().clearDataValidations().setBackground(null).setFontStyle(null).setFontWeight(null).setFontColor(null);
+
+  let curRow = lineupStartRow;
+
+  // ── Lineup Cards ──
+  suggesterSheet.getRange(curRow, 1).setValue('Lineup Card')
+    .setFontSize(13).setFontWeight('bold').setBackground('#e8f0fe');
+  curRow++;
+
+  for (let g = 0; g < games; g++) {
+    const lineup = allGamesLineups[g];
+    const sitOuts = allGamesSitOuts[g];
+    const battingOrder = allGamesBatOrders[g];
+    const sitOutCap = allGamesSitOutCaps[g];
+    const reliefPitcher = allGamesReliefPitchers[g];
+    const availablePlayers = perGameAvailable[g];
+    const numSitOut = availablePlayers.length - POSITIONS.length;
+
+    // Build stats lookup from batting order
+    const statsLookup = {};
+    for (const entry of battingOrder) {
+      statsLookup[entry.name] = { obp: entry.obp, slg: entry.slg };
+    }
+
+    // Game title row (only when games > 1)
+    if (games > 1) {
+      suggesterSheet.getRange(curRow, 1).setValue('Game ' + (g + 1))
+        .setFontSize(12).setFontWeight('bold').setBackground(gameColors[g]).setFontColor(gameTitleFontColors[g]);
+      suggesterSheet.getRange(curRow, 1, 1, 2 + innings + 2).setBackground(gameColors[g]);
+      curRow++;
+    }
+
+    // Card header
+    const cardHeaders = ['#', 'Player'];
+    for (let i = 1; i <= innings; i++) cardHeaders.push('Inn ' + i);
+    cardHeaders.push('OBP', 'SLG');
+    suggesterSheet.getRange(curRow, 1, 1, cardHeaders.length).setValues([cardHeaders])
+      .setFontWeight('bold').setBackground('#1a73e8').setFontColor('white').setHorizontalAlignment('center');
+    curRow++;
+
+    // Card data rows
+    const cardData = [];
+    const cardBackgrounds = [];
+    for (let b = 0; b < battingOrder.length; b++) {
+      const playerName = battingOrder[b].name;
+      const row = [b + 1, playerName];
+      const bgRow = [null, null];
+
+      for (let inning = 0; inning < innings; inning++) {
+        const posIndex = lineup[inning].indexOf(playerName);
+        if (posIndex >= 0) {
+          const pos = POSITIONS[posIndex];
+          row.push(pos);
+          bgRow.push(preferences[playerName] && preferences[playerName][pos] === 'Preferred' ? '#b7e1cd' : null);
+        } else if (sitOuts[inning].indexOf(playerName) >= 0) {
+          row.push('OUT');
+          bgRow.push('#e0e0e0');
+        } else {
+          row.push('');
+          bgRow.push(null);
+        }
+      }
+
+      const stats = statsLookup[playerName] || { obp: 0, slg: 0 };
+      row.push(stats.obp > 0 ? stats.obp.toFixed(3) : '-');
+      row.push(stats.slg > 0 ? stats.slg.toFixed(3) : '-');
+      bgRow.push(null, null);
+
+      cardData.push(row);
+      cardBackgrounds.push(bgRow);
+    }
+
+    if (cardData.length > 0) {
+      const cardRange = suggesterSheet.getRange(curRow, 1, cardData.length, cardData[0].length);
+      cardRange.setValues(cardData);
+      cardRange.setBackgrounds(cardBackgrounds);
+      suggesterSheet.getRange(curRow, 1, cardData.length, 1).setHorizontalAlignment('center').setFontWeight('bold');
+      suggesterSheet.getRange(curRow, 3, cardData.length, innings + 2).setHorizontalAlignment('center');
+      suggesterSheet.getRange(curRow, 2, cardData.length, 1).setFontSize(11);
+
+      const posValidation = SpreadsheetApp.newDataValidation()
+        .requireValueInList(POSITIONS.concat(['OUT', '']), true)
+        .setAllowInvalid(true)
+        .build();
+      suggesterSheet.getRange(curRow, 3, cardData.length, innings).setDataValidation(posValidation);
+      curRow += cardData.length;
+    }
+
+    // Summary rows
+    if (numSitOut > 0) {
+      suggesterSheet.getRange(curRow, 1).setValue('Max sit-outs per player: ' + sitOutCap)
+        .setFontStyle('italic');
+      suggesterSheet.getRange(curRow, 1, 1, 4).mergeAcross();
+      curRow++;
+    }
+
     if (reliefPitcher) {
+      const startingPitcher = lineup[0][0];
+      const pitchesAllGame = lineup.every(inn => inn[0] === startingPitcher);
       const reliefLabel = pitchesAllGame
         ? 'Relief pitcher (if needed): ' + reliefPitcher + ' — starter pitches all ' + innings + ' innings'
         : 'Relief pitcher (if needed): ' + reliefPitcher;
-      suggesterSheet.getRange(cardSummaryRow, 1).setValue(reliefLabel)
+      suggesterSheet.getRange(curRow, 1).setValue(reliefLabel)
         .setFontStyle('italic');
-      suggesterSheet.getRange(cardSummaryRow, 1, 1, Math.max(6, cardHeaders.length)).mergeAcross();
-      cardSummaryRow++;
+      suggesterSheet.getRange(curRow, 1, 1, Math.max(6, cardHeaders.length)).mergeAcross();
+      curRow++;
     }
+
+    curRow++; // gap between games
   }
 
-  // ── Field Lineup grid (position-centric, for Game Entry copy-paste) ──
-  // Clear previous field lineup
-  const fieldClearRange = suggesterSheet.getRange(fieldStartRow + 2, 1, 11, POSITIONS.length + 4);
-  fieldClearRange.breakApart().clearContent().setBackground(null).setFontStyle(null).setFontWeight(null);
+  // ── Field Lineup grids ──
+  curRow++; // extra gap
+  for (let g = 0; g < games; g++) {
+    const lineup = allGamesLineups[g];
+    const sitOuts = allGamesSitOuts[g];
+    const availablePlayers = perGameAvailable[g];
 
-  const lineupData = [];
-  const lineupBackgrounds = [];
-  for (let inning = 0; inning < innings; inning++) {
-    const row = [inning + 1];
-    const bgRow = [null];
-    for (let j = 0; j < POSITIONS.length; j++) {
-      const playerName = lineup[inning][j];
-      row.push(playerName);
-      if (preferences[playerName] && preferences[playerName][POSITIONS[j]] === 'Preferred') {
-        bgRow.push('#b7e1cd');
-      } else {
+    const fieldLabel = games > 1
+      ? 'Game ' + (g + 1) + ' Field Lineup (copy to Game Entry)'
+      : 'Suggested Field Lineup (for Game Entry copy-paste)';
+    suggesterSheet.getRange(curRow, 1).setValue(fieldLabel)
+      .setFontSize(13).setFontWeight('bold').setBackground('#e8f0fe');
+    curRow++;
+
+    // Grid header
+    const gridHeaders = ['Inning'];
+    POSITIONS.forEach(p => gridHeaders.push(p));
+    for (let s = 1; s <= 3; s++) gridHeaders.push('Sit Out ' + s);
+    suggesterSheet.getRange(curRow, 1, 1, gridHeaders.length).setValues([gridHeaders])
+      .setFontWeight('bold').setBackground('#34a853').setFontColor('white').setHorizontalAlignment('center');
+    curRow++;
+
+    // Game title row in grid (only when games > 1)
+    if (games > 1) {
+      suggesterSheet.getRange(curRow - 2, 1, 1, gridHeaders.length)
+        .setBackground(gameColors[g]);
+      // Re-set the title text styling after background
+      suggesterSheet.getRange(curRow - 2, 1).setFontColor(gameTitleFontColors[g]);
+    }
+
+    const lineupData = [];
+    const lineupBackgrounds = [];
+    for (let inning = 0; inning < innings; inning++) {
+      const row = [inning + 1];
+      const bgRow = [null];
+      for (let j = 0; j < POSITIONS.length; j++) {
+        const playerName = lineup[inning][j];
+        row.push(playerName);
+        bgRow.push(preferences[playerName] && preferences[playerName][POSITIONS[j]] === 'Preferred' ? '#b7e1cd' : null);
+      }
+      for (let s = 0; s < 3; s++) {
+        row.push(s < sitOuts[inning].length ? sitOuts[inning][s] : '');
         bgRow.push(null);
       }
+      lineupData.push(row);
+      lineupBackgrounds.push(bgRow);
     }
-    for (let s = 0; s < 3; s++) {
-      row.push(s < sitOuts[inning].length ? sitOuts[inning][s] : '');
-      bgRow.push(null);
+
+    if (lineupData.length > 0) {
+      const outputRange = suggesterSheet.getRange(curRow, 1, lineupData.length, lineupData[0].length);
+      outputRange.setValues(lineupData);
+      outputRange.setBackgrounds(lineupBackgrounds);
+      suggesterSheet.getRange(curRow, 1, lineupData.length, 1).setHorizontalAlignment('center').setFontWeight('bold');
+
+      const editRule = SpreadsheetApp.newDataValidation()
+        .requireValueInList(availablePlayers, true)
+        .setAllowInvalid(true)
+        .build();
+      suggesterSheet.getRange(curRow, 2, lineupData.length, POSITIONS.length).setDataValidation(editRule);
+      suggesterSheet.getRange(curRow, POSITIONS.length + 2, lineupData.length, 3).setDataValidation(editRule);
+      curRow += lineupData.length;
     }
-    lineupData.push(row);
-    lineupBackgrounds.push(bgRow);
-  }
-  if (lineupData.length > 0) {
-    const outputRange = suggesterSheet.getRange(fieldStartRow + 2, 1, lineupData.length, lineupData[0].length);
-    outputRange.setValues(lineupData);
-    outputRange.setBackgrounds(lineupBackgrounds);
-    suggesterSheet.getRange(fieldStartRow + 2, 1, lineupData.length, 1).setHorizontalAlignment('center').setFontWeight('bold');
 
-    const editRule = SpreadsheetApp.newDataValidation()
-      .requireValueInList(availablePlayers, true)
-      .setAllowInvalid(true)
-      .build();
-    suggesterSheet.getRange(fieldStartRow + 2, 2, lineupData.length, POSITIONS.length).setDataValidation(editRule);
-    suggesterSheet.getRange(fieldStartRow + 2, POSITIONS.length + 2, lineupData.length, 3).setDataValidation(editRule);
+    curRow += 2; // gap between games
   }
 
-  // ── Batting Order grid ──
-  // Clear previous batting order
-  suggesterSheet.getRange(battingStartRow + 2, 1, MAX_PLAYERS, 5).clearContent();
+  // ── Batting Order grids ──
+  for (let g = 0; g < games; g++) {
+    const battingOrder = allGamesBatOrders[g];
 
-  const battingData = [];
-  for (const entry of battingOrder) {
-    battingData.push([
-      entry.position,
-      entry.name,
-      entry.obp > 0 ? entry.obp.toFixed(3) : '-',
-      entry.slg > 0 ? entry.slg.toFixed(3) : '-',
-      entry.sb > 0 ? entry.sb : '-'
-    ]);
-  }
-  if (battingData.length > 0) {
-    suggesterSheet.getRange(battingStartRow + 2, 1, battingData.length, 5).setValues(battingData);
-    suggesterSheet.getRange(battingStartRow + 2, 1, battingData.length, 1).setHorizontalAlignment('center').setFontWeight('bold');
-    suggesterSheet.getRange(battingStartRow + 2, 3, battingData.length, 3).setHorizontalAlignment('center');
-    suggesterSheet.getRange(battingStartRow + 2, 2, battingData.length, 1).setFontSize(11);
+    const battingLabel = games > 1
+      ? 'Game ' + (g + 1) + ' Batting Order'
+      : 'Suggested Batting Order';
+    suggesterSheet.getRange(curRow, 1).setValue(battingLabel)
+      .setFontSize(13).setFontWeight('bold').setBackground('#e8f0fe');
+    curRow++;
+
+    if (games > 1) {
+      suggesterSheet.getRange(curRow - 1, 1, 1, 5).setBackground(gameColors[g]);
+      suggesterSheet.getRange(curRow - 1, 1).setFontColor(gameTitleFontColors[g]);
+    }
+
+    const battingHeaders = ['#', 'Player', 'OBP', 'SLG', 'SB'];
+    suggesterSheet.getRange(curRow, 1, 1, battingHeaders.length).setValues([battingHeaders])
+      .setFontWeight('bold').setBackground('#fbbc04').setFontColor('white').setHorizontalAlignment('center');
+    curRow++;
+
+    const battingData = [];
+    for (const entry of battingOrder) {
+      battingData.push([
+        entry.position,
+        entry.name,
+        entry.obp > 0 ? entry.obp.toFixed(3) : '-',
+        entry.slg > 0 ? entry.slg.toFixed(3) : '-',
+        entry.sb > 0 ? entry.sb : '-'
+      ]);
+    }
+    if (battingData.length > 0) {
+      suggesterSheet.getRange(curRow, 1, battingData.length, 5).setValues(battingData);
+      suggesterSheet.getRange(curRow, 1, battingData.length, 1).setHorizontalAlignment('center').setFontWeight('bold');
+      suggesterSheet.getRange(curRow, 3, battingData.length, 3).setHorizontalAlignment('center');
+      suggesterSheet.getRange(curRow, 2, battingData.length, 1).setFontSize(11);
+      curRow += battingData.length;
+    }
+
+    curRow += 2; // gap between games
   }
 
   suggesterSheet.activate();
-  const sitOutMsg = numSitOut > 0 ? '\nSit-out cap: ' + sitOutCap + ' per player.' : '';
-  const reliefMsg = reliefPitcher ? '\nRelief pitcher: ' + reliefPitcher : '';
+  const gameLabel = games > 1 ? games + ' games of ' + innings + ' innings' : innings + ' innings';
+  const firstReliefPitcher = allGamesReliefPitchers.find(r => r);
+  const reliefMsg = firstReliefPitcher ? '\nRelief pitcher: ' + firstReliefPitcher : '';
   ui.alert('Lineup Generated',
-    'A suggested lineup has been generated for ' + innings + ' innings.' +
-    sitOutMsg + reliefMsg +
+    'A suggested lineup has been generated for ' + gameLabel + '.' +
+    reliefMsg +
     '\n\nField positions and batting order are shown below.\n' +
     'You can manually edit any cell using the dropdowns.\n' +
-    'Copy this to the Game Entry sheet when ready.',
+    'Copy to the Game Entry sheet when ready.',
     ui.ButtonSet.OK);
 }
 
-function assignPositions(players, preferences, gamesSinceAtPosition, previousInnings, currentInning, depthChart) {
+function assignPositions(players, preferences, gamesSinceAtPosition, previousInnings, currentInning, depthChart, totalGames) {
   // Score each player-position combination
   const numPlayers = players.length;
   const numPositions = POSITIONS.length;
@@ -1673,7 +1822,10 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
 
         // Outfield-only avoidance: if a player has only played OF positions (LF/CF/RF)
         // so far this game, give infield positions a bonus to mix them in
-        if (currentInning >= 2 && j < 6) { // current position is infield (P/C/1B/2B/3B/SS)
+        // In multi-game mode, kick in earlier and with a stronger bonus
+        const multiGame = (totalGames || 1) > 1;
+        const ofThreshold = multiGame ? 1 : 2; // trigger after 1 inning in multi-game, 2 in single
+        if (currentInning >= ofThreshold && j < 6) { // current position is infield (P/C/1B/2B/3B/SS)
           let allOutfield = true;
           let inningsPlayed = 0;
           for (let k = 0; k < currentInning; k++) {
@@ -1686,13 +1838,42 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
               }
             }
           }
-          if (allOutfield && inningsPlayed >= 2) {
-            score -= 15; // bonus to pull outfield-only players into infield
+          if (allOutfield && inningsPlayed >= ofThreshold) {
+            score -= multiGame ? 35 : 15; // stronger bonus in multi-game to ensure everyone gets infield time
           }
         }
       }
 
       scores[p][j] = score;
+    }
+  }
+
+  // In multi-game mode, add 15% jitter to non-blocked scores for position variety
+  if ((totalGames || 1) > 1) {
+    // Seeded PRNG from currentInning so each inning gets different but deterministic jitter
+    let seed = (currentInning + 1) * 2654435761;
+    function nextRand() {
+      seed = (seed * 1664525 + 1013904223) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    }
+    // Find the score range among non-blocked entries for scaling
+    let minScore = Infinity, maxScore = -Infinity;
+    for (let p = 0; p < numPlayers; p++) {
+      for (let j = 0; j < numPositions; j++) {
+        if (scores[p][j] < 10000) {
+          if (scores[p][j] < minScore) minScore = scores[p][j];
+          if (scores[p][j] > maxScore) maxScore = scores[p][j];
+        }
+      }
+    }
+    const range = Math.max(maxScore - minScore, 1);
+    const jitterScale = range * 0.15;
+    for (let p = 0; p < numPlayers; p++) {
+      for (let j = 0; j < numPositions; j++) {
+        if (scores[p][j] < 10000) {
+          scores[p][j] += (nextRand() * 2 - 1) * jitterScale;
+        }
+      }
     }
   }
 
@@ -1869,6 +2050,33 @@ function onEdit(e) {
     updateSuggesterNames();
     updateDepthChartDropdowns();
   }
+
+  // Watch Games input on Lineup Suggester (cell G4) to enable/disable G2/G3 columns
+  if (sheet.getName() === 'Lineup Suggester' && e.range.getRow() === 4 && e.range.getColumn() === 7) {
+    const games = Number(e.range.getValue());
+    // Read G1 column to use as default for newly enabled game columns
+    const g1Values = sheet.getRange(7, 3, MAX_PLAYERS, 1).getValues();
+    if (games >= 2) {
+      // Enable G2: set font to black and default attendance to match G1
+      sheet.getRange('D6').setFontColor(null);
+      const g2Values = g1Values.map(row => [row[0]]);
+      sheet.getRange(7, 4, MAX_PLAYERS, 1).setValues(g2Values).setFontColor(null);
+    } else {
+      // Gray out G2
+      sheet.getRange('D6').setFontColor('#cccccc');
+      sheet.getRange(7, 4, MAX_PLAYERS, 1).setFontColor('#cccccc');
+    }
+    if (games >= 3) {
+      // Enable G3: set font to black and default attendance to match G1
+      sheet.getRange('E6').setFontColor(null);
+      const g3Values = g1Values.map(row => [row[0]]);
+      sheet.getRange(7, 5, MAX_PLAYERS, 1).setValues(g3Values).setFontColor(null);
+    } else {
+      // Gray out G3
+      sheet.getRange('E6').setFontColor('#cccccc');
+      sheet.getRange(7, 5, MAX_PLAYERS, 1).setFontColor('#cccccc');
+    }
+  }
 }
 
 function updateSuggesterNames() {
@@ -1877,28 +2085,32 @@ function updateSuggesterNames() {
   if (!sheet) return;
 
   const players = getRosterNames();
-  // Read existing checkboxes, names, and rest columns to preserve user selections
+  // Read existing checkboxes, names, and 5 checkbox columns (G1, G2, G3, Rest P, Rest C)
   const existingChecks = sheet.getRange(7, 1, MAX_PLAYERS, 1).getValues();
   const existingNames = sheet.getRange(7, 2, MAX_PLAYERS, 1).getValues();
-  const existingRest = sheet.getRange(7, 3, MAX_PLAYERS, 2).getValues();
+  const existingGameRest = sheet.getRange(7, 3, MAX_PLAYERS, 5).getValues();
 
   const checkValues = [];
   const nameValues = [];
-  const restValues = [];
+  const gameRestValues = [];
   for (let i = 0; i < MAX_PLAYERS; i++) {
     if (i < players.length) {
       // Preserve checkbox state if the name hasn't changed; default to true for new names
       const nameChanged = existingNames[i][0] !== players[i];
       checkValues.push([nameChanged ? true : existingChecks[i][0]]);
       nameValues.push([players[i]]);
-      restValues.push(nameChanged ? [false, false] : [existingRest[i][0], existingRest[i][1]]);
+      if (nameChanged) {
+        gameRestValues.push([true, false, false, false, false]); // G1=true, G2/G3/RestP/RestC=false
+      } else {
+        gameRestValues.push([existingGameRest[i][0], existingGameRest[i][1], existingGameRest[i][2], existingGameRest[i][3], existingGameRest[i][4]]);
+      }
     } else {
       checkValues.push([false]);
       nameValues.push(['']);
-      restValues.push([false, false]);
+      gameRestValues.push([false, false, false, false, false]);
     }
   }
   sheet.getRange(7, 1, MAX_PLAYERS, 1).setValues(checkValues);
   sheet.getRange(7, 2, MAX_PLAYERS, 1).setValues(nameValues);
-  sheet.getRange(7, 3, MAX_PLAYERS, 2).setValues(restValues);
+  sheet.getRange(7, 3, MAX_PLAYERS, 5).setValues(gameRestValues);
 }
