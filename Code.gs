@@ -968,7 +968,7 @@ function createLineupSuggesterSheet(ss) {
 
   const gridHeaders = ['Inning'];
   POSITIONS.forEach(p => gridHeaders.push(p));
-  gridHeaders.push('Sit Out');
+  for (let s = 1; s <= 3; s++) gridHeaders.push('Sit Out ' + s);
   sheet.getRange(lineupStartRow + 1, 1, 1, gridHeaders.length).setValues([gridHeaders])
     .setFontWeight('bold').setBackground('#34a853').setFontColor('white').setHorizontalAlignment('center');
 
@@ -1251,8 +1251,8 @@ function suggestLineup() {
   // Write suggested field lineup to sheet
   const lineupStartRow = 7 + MAX_PLAYERS + 1;
 
-  // Clear previous suggestions (extra row for summary)
-  const clearRange = suggesterSheet.getRange(lineupStartRow + 2, 1, 10, POSITIONS.length + 2);
+  // Clear previous suggestions (extra rows for summary)
+  const clearRange = suggesterSheet.getRange(lineupStartRow + 2, 1, 12, POSITIONS.length + 4);
   clearRange.clearContent().setBackground(null).setFontStyle(null).setFontWeight(null);
 
   // Batch write lineup data
@@ -1270,8 +1270,11 @@ function suggestLineup() {
         bgRow.push(null);
       }
     }
-    row.push(sitOuts[inning].join(', '));
-    bgRow.push(null);
+    // Split sit-outs into 3 separate columns (matches Game Entry layout)
+    for (let s = 0; s < 3; s++) {
+      row.push(s < sitOuts[inning].length ? sitOuts[inning][s] : '');
+      bgRow.push(null);
+    }
     lineupData.push(row);
     lineupBackgrounds.push(bgRow);
   }
@@ -1288,6 +1291,8 @@ function suggestLineup() {
       .setAllowInvalid(true)
       .build();
     suggesterSheet.getRange(lineupStartRow + 2, 2, lineupData.length, POSITIONS.length).setDataValidation(editRule);
+    // Also add dropdowns to sit-out columns
+    suggesterSheet.getRange(lineupStartRow + 2, POSITIONS.length + 2, lineupData.length, 3).setDataValidation(editRule);
 
     // Write summary rows below the lineup
     let summaryRow = lineupStartRow + 2 + lineupData.length;
@@ -1458,6 +1463,26 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
             } else {
               score -= 10; // 2nd consecutive inning: small bonus for stability
             }
+          }
+        }
+
+        // Outfield-only avoidance: if a player has only played OF positions (LF/CF/RF)
+        // so far this game, give infield positions a bonus to mix them in
+        if (currentInning >= 2 && j < 6) { // current position is infield (P/C/1B/2B/3B/SS)
+          let allOutfield = true;
+          let inningsPlayed = 0;
+          for (let k = 0; k < currentInning; k++) {
+            const prevIdx = previousInnings[k].indexOf(playerName);
+            if (prevIdx >= 0) {
+              inningsPlayed++;
+              if (prevIdx < 6) { // was at an infield position
+                allOutfield = false;
+                break;
+              }
+            }
+          }
+          if (allOutfield && inningsPlayed >= 2) {
+            score -= 15; // bonus to pull outfield-only players into infield
           }
         }
       }
