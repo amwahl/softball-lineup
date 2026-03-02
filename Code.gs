@@ -1260,6 +1260,7 @@ function suggestLineup() {
     lineupData.push(row);
     lineupBackgrounds.push(bgRow);
   }
+  let reliefPitcher = null;
   if (lineupData.length > 0) {
     const outputRange = suggesterSheet.getRange(lineupStartRow + 2, 1, lineupData.length, lineupData[0].length);
     outputRange.setValues(lineupData);
@@ -1273,12 +1274,37 @@ function suggestLineup() {
       .build();
     suggesterSheet.getRange(lineupStartRow + 2, 2, lineupData.length, POSITIONS.length).setDataValidation(editRule);
 
-    // Write sit-out cap summary row below the lineup
+    // Write summary rows below the lineup
+    let summaryRow = lineupStartRow + 2 + lineupData.length;
+
     if (numSitOut > 0) {
-      const summaryRow = lineupStartRow + 2 + lineupData.length;
       suggesterSheet.getRange(summaryRow, 1).setValue('Max sit-outs per player: ' + sitOutCap)
         .setFontStyle('italic');
       suggesterSheet.getRange(summaryRow, 1, 1, 4).mergeAcross();
+      summaryRow++;
+    }
+
+    // Suggest a relief pitcher — the next depth chart pitcher who isn't the starter
+    // and isn't restricted from pitching
+    const startingPitcher = lineup[0][0];
+    const pitchesAllGame = lineup.every(inn => inn[0] === startingPitcher);
+    if (depthChart && depthChart['P']) {
+      for (const candidate of depthChart['P']) {
+        if (candidate === startingPitcher) continue;
+        if (availablePlayers.indexOf(candidate) < 0) continue;
+        if (preferences[candidate] && preferences[candidate]['P'] === 'Restricted') continue;
+        reliefPitcher = candidate;
+        break;
+      }
+    }
+    if (reliefPitcher) {
+      const reliefLabel = pitchesAllGame
+        ? 'Relief pitcher (if needed): ' + reliefPitcher + ' — starter pitches all ' + innings + ' innings'
+        : 'Relief pitcher (if needed): ' + reliefPitcher;
+      suggesterSheet.getRange(summaryRow, 1).setValue(reliefLabel)
+        .setFontStyle('italic');
+      suggesterSheet.getRange(summaryRow, 1, 1, 6).mergeAcross();
+      summaryRow++;
     }
   }
 
@@ -1308,11 +1334,12 @@ function suggestLineup() {
   }
 
   suggesterSheet.activate();
-  const sitOutMsg = numSitOut > 0 ? '\nSit-out cap: ' + sitOutCap + ' per player.\n' : '\n';
+  const sitOutMsg = numSitOut > 0 ? '\nSit-out cap: ' + sitOutCap + ' per player.' : '';
+  const reliefMsg = reliefPitcher ? '\nRelief pitcher: ' + reliefPitcher : '';
   ui.alert('Lineup Generated',
-    'A suggested lineup has been generated for ' + innings + ' innings.\n' +
-    sitOutMsg +
-    'Field positions and batting order are shown below.\n' +
+    'A suggested lineup has been generated for ' + innings + ' innings.' +
+    sitOutMsg + reliefMsg +
+    '\n\nField positions and batting order are shown below.\n' +
     'You can manually edit any cell using the dropdowns.\n' +
     'Copy this to the Game Entry sheet when ready.',
     ui.ButtonSet.OK);
