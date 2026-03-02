@@ -15,11 +15,18 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
   ui.createMenu('⚾ Softball')
     .addItem('Initialize All Sheets', 'initializeAll')
+    .addItem('Rebuild Game Entry', 'rebuildGameEntry')
     .addSeparator()
     .addItem('Save Game', 'saveGame')
     .addItem('Suggest Lineup', 'suggestLineup')
     .addItem('Refresh Dashboard', 'refreshDashboard')
     .addToUi();
+}
+
+function rebuildGameEntry() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  createGameEntrySheet(ss);
+  ss.getSheetByName('Game Entry').activate();
 }
 
 function initializeAll() {
