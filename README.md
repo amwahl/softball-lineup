@@ -81,6 +81,7 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - On the Lineup Suggester, check **Rest P** or **Rest C** next to a player to hold them back from Pitcher or Catcher for that game
 - Useful for friendlies, early tournament games, or resting arms for a later bracket game
 - The player still plays all other positions — only the checked position is blocked
+- **Validation:** If rest flags + roster restrictions leave too few pitchers or catchers, the system warns you before generating so you can adjust
 - Rest flags reset when you change the roster but are preserved between lineup generations
 
 ### Batting Order Algorithm
