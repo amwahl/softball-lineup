@@ -1229,12 +1229,16 @@ function suggestLineup() {
     playing.forEach(p => inningCountThisGame[p]++);
   }
 
+  // Calculate sit-out cap for display
+  const numSitOut = availablePlayers.length - POSITIONS.length;
+  const sitOutCap = numSitOut > 0 ? Math.ceil(innings * numSitOut / availablePlayers.length) : 0;
+
   // Write suggested field lineup to sheet
   const lineupStartRow = 7 + MAX_PLAYERS + 1;
 
-  // Clear previous suggestions
-  const clearRange = suggesterSheet.getRange(lineupStartRow + 2, 1, 9, POSITIONS.length + 2);
-  clearRange.clearContent().setBackground(null);
+  // Clear previous suggestions (extra row for summary)
+  const clearRange = suggesterSheet.getRange(lineupStartRow + 2, 1, 10, POSITIONS.length + 2);
+  clearRange.clearContent().setBackground(null).setFontStyle(null).setFontWeight(null);
 
   // Batch write lineup data
   const lineupData = [];
@@ -1268,6 +1272,14 @@ function suggestLineup() {
       .setAllowInvalid(true)
       .build();
     suggesterSheet.getRange(lineupStartRow + 2, 2, lineupData.length, POSITIONS.length).setDataValidation(editRule);
+
+    // Write sit-out cap summary row below the lineup
+    if (numSitOut > 0) {
+      const summaryRow = lineupStartRow + 2 + lineupData.length;
+      suggesterSheet.getRange(summaryRow, 1).setValue('Max sit-outs per player: ' + sitOutCap)
+        .setFontStyle('italic');
+      suggesterSheet.getRange(summaryRow, 1, 1, 4).mergeAcross();
+    }
   }
 
   // Generate and write batting order
@@ -1296,8 +1308,10 @@ function suggestLineup() {
   }
 
   suggesterSheet.activate();
+  const sitOutMsg = numSitOut > 0 ? '\nSit-out cap: ' + sitOutCap + ' per player.\n' : '\n';
   ui.alert('Lineup Generated',
-    'A suggested lineup has been generated for ' + innings + ' innings.\n\n' +
+    'A suggested lineup has been generated for ' + innings + ' innings.\n' +
+    sitOutMsg +
     'Field positions and batting order are shown below.\n' +
     'You can manually edit any cell using the dropdowns.\n' +
     'Copy this to the Game Entry sheet when ready.',
@@ -1395,10 +1409,12 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
             // P and C get a much stronger continuity bonus since leaving is permanent
             if (j === 0 || j === 1) {
               score -= 50; // P/C: strong incentive to keep pitcher/catcher in place
+            } else if (consecutiveCount >= 3) {
+              score += 30; // 4th+ consecutive inning at same field position: penalty to encourage rotation
             } else if (consecutiveCount >= 2) {
-              score -= 15; // 3rd+ consecutive inning: stronger bonus
+              score += 5; // 3rd consecutive inning: mild penalty to start encouraging moves
             } else {
-              score -= 10; // 2nd consecutive inning: standard bonus
+              score -= 10; // 2nd consecutive inning: small bonus for stability
             }
           }
         }
