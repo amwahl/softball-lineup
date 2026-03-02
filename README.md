@@ -28,6 +28,7 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
    - Click the **Run** button (▶)
    - When prompted, click **Review Permissions** > choose your Google account > **Allow**
    - This grants the script permission to modify your spreadsheet
+   - **Re-running is safe:** Initialize All Sheets preserves your existing roster names and preferences
 
 5. **Return to your spreadsheet**
    - You'll see a new **⚾ Softball** menu at the far right of the menu bar (after Extensions and Help)
@@ -62,7 +63,8 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 
 - Scores each player-position combination based on preference, depth chart ranking, recency, and continuity
 - Restricted positions are hard constraints — a player will never be assigned to a Restricted position
-- **No-return rule for P/C:** Once a player leaves Pitcher or Catcher, they cannot return to that position later in the game
+- **No-return rule for P (hard):** Once a player leaves Pitcher, they cannot return to that position later in the game
+- **No-return rule for C (soft):** Once a player leaves Catcher, the algorithm strongly avoids putting them back but will allow it if needed
 - **Bullpen warmup (soft):** The algorithm prefers pitchers who sat out the previous inning to warm up, but will assign an available pitcher without warmup if needed
 - **P/C continuity:** Pitcher and Catcher get a stronger continuity bonus than field positions, since leaving is permanent
 - Players get a bonus for staying at the same position across innings (builds comfort and confidence)
@@ -91,6 +93,14 @@ The Game Entry sheet is organized top to bottom:
 3. **Lineup grid** (rows 19-28) — Position assignments and sit-outs per inning
 4. **Batting stats** (rows 30+) — Per-player at-bats, hits, walks, steals
 
+## Updating the Code
+
+To update `Code.gs` without losing data:
+
+1. Open **Extensions > Apps Script** and paste the new code over the old
+2. Save, then use **⚾ Softball > Rebuild Game Entry** to update the Game Entry layout
+3. Season History, Batting Stats, Roster, and Depth Chart are all preserved
+
 ## Notes
 
 - The `onEdit` trigger auto-updates dropdowns when you change roster names
@@ -99,3 +109,4 @@ The Game Entry sheet is organized top to bottom:
 - **Attendance:** Uncheck absent players on Game Entry before saving — they are excluded from season history and don't affect recency scoring
 - **Batting Stats corrections:** You can edit the Batting Stats sheet directly to fix errors, then Refresh Dashboard
 - **Lineup Suggester:** Player names refresh automatically from the roster each time you generate a lineup
+- **Rebuild Game Entry:** Use this menu option after code updates to refresh the Game Entry layout without affecting other sheets
