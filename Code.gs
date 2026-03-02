@@ -68,7 +68,17 @@ function initializeStep2() {
 
 function createRosterSheet(ss) {
   let sheet = ss.getSheetByName('Roster');
-  if (sheet) sheet.clear(); else sheet = ss.insertSheet('Roster');
+
+  // Preserve existing roster data (names and preferences) before clearing
+  let existingData = null;
+  if (sheet) {
+    const data = sheet.getRange(2, 2, MAX_PLAYERS, POSITIONS.length + 1).getValues();
+    const hasData = data.some(row => row[0] && row[0].toString().trim() !== '');
+    if (hasData) existingData = data;
+    sheet.clear();
+  } else {
+    sheet = ss.insertSheet('Roster');
+  }
 
   // Header row
   const headers = ['#', 'Player Name'];
@@ -115,6 +125,11 @@ function createRosterSheet(ss) {
 
   sheet.setFrozenRows(1);
   sheet.getRange(2, 2, MAX_PLAYERS, 1).setFontSize(12);
+
+  // Restore existing roster data if it was preserved
+  if (existingData) {
+    sheet.getRange(2, 2, MAX_PLAYERS, POSITIONS.length + 1).setValues(existingData);
+  }
 }
 
 // ============================================================
