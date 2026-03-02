@@ -1348,8 +1348,9 @@ function suggestLineup() {
   const lineupStartRow = 7 + MAX_PLAYERS + 1;
 
   // Clear previous suggestions (extra rows for summary)
-  const clearRange = suggesterSheet.getRange(lineupStartRow + 2, 1, 12, POSITIONS.length + 4);
-  clearRange.clearContent().setBackground(null).setFontStyle(null).setFontWeight(null);
+  // 9 max innings + 2 summary rows = 11 rows (don't clear batting order header at row 12)
+  const clearRange = suggesterSheet.getRange(lineupStartRow + 2, 1, 11, POSITIONS.length + 4);
+  clearRange.breakApart().clearContent().setBackground(null).setFontStyle(null).setFontWeight(null);
 
   // Batch write lineup data
   const lineupData = [];
