@@ -996,6 +996,9 @@ function suggestLineup() {
     return;
   }
 
+  // Ensure player names are current from roster
+  updateSuggesterNames();
+
   const innings = suggesterSheet.getRange('B4').getValue();
   if (!innings || innings < 1) {
     ui.alert('Error', 'Please enter a valid number of innings.', ui.ButtonSet.OK);
