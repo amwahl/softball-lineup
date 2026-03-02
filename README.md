@@ -8,6 +8,7 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - **Depth Chart** — Rank players at each position to guide the lineup algorithm
 - **Game Entry** — Record each game's lineup and batting stats with dropdowns, attendance checkboxes, and multiple sit-out columns
 - **Lineup Suggester** — Auto-generate balanced field lineups with rest options, relief pitcher suggestions, and fair sit-out rotation
+- **Lineup Card** — Combined coach-friendly view: players in batting order, positions per inning, with OBP/SLG stats
 - **Batting Order** — Suggest optimal batting orders based on OBP, slugging, and speed stats
 - **Season Dashboard** — View innings at each position, recency tracking, and cumulative batting stats
 - **Delete Last Game** — Undo a saved game if entered incorrectly
@@ -46,7 +47,7 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 | **Season History** | Auto-populated fielding data (don't edit directly) |
 | **Batting Stats** | Auto-populated per-game batting data (editable to fix errors) |
 | **Dashboard** | Season stats at a glance — fielding and batting |
-| **Lineup Suggester** | Auto-generate field lineups and batting orders |
+| **Lineup Suggester** | Auto-generate lineup card, field lineups, and batting orders |
 | **How To Use** | In-app instructions |
 
 ## First Steps After Setup
@@ -83,6 +84,24 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - The player still plays all other positions — only the checked position is blocked
 - **Validation:** If rest flags + roster restrictions leave too few pitchers or catchers, the system warns you before generating so you can adjust
 - Rest flags reset when you change the roster but are preserved between lineup generations
+
+### Lineup Card (Combined View)
+
+When you run Suggest Lineup, the first output is a **Lineup Card** — a single grid combining batting order and fielding:
+
+| # | Player | Inn 1 | Inn 2 | Inn 3 | ... | OBP | SLG |
+|---|--------|-------|-------|-------|-----|-----|-----|
+| 1 | Alice  | P     | P     | SS    | ... | .400 | .500 |
+| 2 | Beth   | C     | C     | C     | ... | .350 | .400 |
+
+- Rows are players in **batting order** — read top to bottom for your batting lineup
+- Inning columns show each player's **field position** that inning
+- **OUT** (gray background) = player sits out that inning
+- **Green background** = player is at a Preferred position
+- OBP and SLG stats appear at the right edge
+- Summary info (sit-out cap, relief pitcher) appears directly below the card
+- Position dropdowns on each inning cell allow manual edits
+- The old **position-centric grid** (Suggested Field Lineup) is preserved below for easy copy-paste to Game Entry
 
 ### Batting Order Algorithm
 
