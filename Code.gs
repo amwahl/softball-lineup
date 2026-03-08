@@ -1331,24 +1331,68 @@ function suggestLineup() {
   // Get depth chart rankings (shared)
   const depthChart = getDepthChart();
 
-  // Historical total sat out (shared, seeds crossGameSatOutCount)
+  // Historical stats: sit-outs, season position counts, games attended, weekly IP
   const totalSatOut = {};
+  const gamesAttended = {};
+  const seasonPositionCounts = {};
+  const weeklyIP = {};
+  let teamTotalGames = 0;
   if (historySheet) {
     const historyData = historySheet.getDataRange().getValues();
+    const now = new Date();
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const playerGameSets = {};
     for (let i = 1; i < historyData.length; i++) {
       const playerName = historyData[i][5];
+      const gameNum = historyData[i][0];
+      if (gameNum > teamTotalGames) teamTotalGames = gameNum;
+
       const satOut = historyData[i][6 + POSITIONS.length];
       if (!totalSatOut[playerName]) totalSatOut[playerName] = 0;
       if (satOut === 1) totalSatOut[playerName]++;
+
+      // Track games attended per player
+      if (!playerGameSets[playerName]) playerGameSets[playerName] = new Set();
+      playerGameSets[playerName].add(gameNum);
+
+      // Season position counts for diversity scoring
+      if (!seasonPositionCounts[playerName]) {
+        seasonPositionCounts[playerName] = {};
+        POSITIONS.forEach(p => seasonPositionCounts[playerName][p] = 0);
+      }
+      for (let j = 0; j < POSITIONS.length; j++) {
+        if (historyData[i][6 + j] === 1) {
+          seasonPositionCounts[playerName][POSITIONS[j]]++;
+        }
+      }
+
+      // Weekly innings pitched (last 7 days, display only)
+      const gameDate = historyData[i][1];
+      if (gameDate instanceof Date && gameDate >= weekAgo && historyData[i][6] === 1) {
+        weeklyIP[playerName] = (weeklyIP[playerName] || 0) + 1;
+      }
+    }
+    for (const name in playerGameSets) {
+      gamesAttended[name] = playerGameSets[name].size;
     }
   }
+
+  // Missed games per player (for small position equity penalty)
+  const playerMissedGames = {};
+  allAvailablePlayers.forEach(p => {
+    playerMissedGames[p] = teamTotalGames - (gamesAttended[p] || 0);
+  });
 
   // Compute batting averages once
   const battingAverages = computeBattingAverages();
 
   // ── Game loop: generate lineups for each game ──
   const crossGameSatOutCount = {};
-  allAvailablePlayers.forEach(p => crossGameSatOutCount[p] = totalSatOut[p] || 0);
+  const crossGameGamesPlayed = {};
+  allAvailablePlayers.forEach(p => {
+    crossGameSatOutCount[p] = totalSatOut[p] || 0;
+    crossGameGamesPlayed[p] = gamesAttended[p] || 0;
+  });
 
   const allGamesLineups = [];  // [g] -> lineup[inning][posIndex]
   const allGamesSitOuts = [];  // [g] -> sitOuts[inning]
@@ -1396,7 +1440,10 @@ function suggestLineup() {
         const candidates = availablePlayers.slice().sort((a, b) => {
           const inningDiff = inningCountThisGame[b] - inningCountThisGame[a];
           if (inningDiff !== 0) return inningDiff;
-          return (crossGameSatOutCount[a] || 0) - (crossGameSatOutCount[b] || 0);
+          // Sit-out rate (per games played) so missed games don't skew equity
+          const rateA = (crossGameSatOutCount[a] || 0) / Math.max(crossGameGamesPlayed[a] || 1, 1);
+          const rateB = (crossGameSatOutCount[b] || 0) / Math.max(crossGameGamesPlayed[b] || 1, 1);
+          return rateA - rateB;
         });
 
         const sitOutsThisGame = {};
@@ -1433,16 +1480,17 @@ function suggestLineup() {
       sitOuts.push(sittingOut);
 
       const playing = availablePlayers.filter(p => sittingOut.indexOf(p) < 0);
-      const assignment = assignPositions(playing, preferences, gamesSinceAtPosition, lineup, inning, depthChart, games);
+      const assignment = assignPositions(playing, preferences, gamesSinceAtPosition, lineup, inning, depthChart, games, seasonPositionCounts, playerMissedGames);
       lineup.push(assignment);
 
       playing.forEach(p => inningCountThisGame[p]++);
     }
 
-    // Accumulate sit-outs into crossGameSatOutCount
+    // Accumulate sit-outs and games played into cross-game trackers
     for (const p of availablePlayers) {
       const sittingOutCount = innings - inningCountThisGame[p];
       crossGameSatOutCount[p] = (crossGameSatOutCount[p] || 0) + sittingOutCount;
+      crossGameGamesPlayed[p] = (crossGameGamesPlayed[p] || 0) + 1;
     }
 
     // Per-game sit-out cap for display
@@ -1597,6 +1645,25 @@ function suggestLineup() {
       curRow++;
     }
 
+    // Weekly IP tracking for pitchers in this game
+    const gamePitchers = {};
+    for (let inn = 0; inn < innings; inn++) {
+      const pitcher = lineup[inn][0];
+      gamePitchers[pitcher] = (gamePitchers[pitcher] || 0) + 1;
+    }
+    const ipParts = [];
+    for (const p of Object.keys(gamePitchers)) {
+      const existing = weeklyIP[p] || 0;
+      const thisGame = gamePitchers[p];
+      ipParts.push(p + ': ' + existing + '+' + thisGame + '=' + (existing + thisGame));
+    }
+    if (ipParts.length > 0) {
+      suggesterSheet.getRange(curRow, 1).setValue('Weekly IP (prior+this game): ' + ipParts.join(', '))
+        .setFontStyle('italic');
+      suggesterSheet.getRange(curRow, 1, 1, Math.max(6, cardHeaders.length)).mergeAcross();
+      curRow++;
+    }
+
     curRow++; // gap between games
   }
 
@@ -1721,7 +1788,7 @@ function suggestLineup() {
     ui.ButtonSet.OK);
 }
 
-function assignPositions(players, preferences, gamesSinceAtPosition, previousInnings, currentInning, depthChart, totalGames) {
+function assignPositions(players, preferences, gamesSinceAtPosition, previousInnings, currentInning, depthChart, totalGames, seasonPositionCounts, playerMissedGames) {
   // Score each player-position combination
   const numPlayers = players.length;
   const numPositions = POSITIONS.length;
@@ -1852,6 +1919,24 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
           if (allOutfield && inningsPlayed >= ofThreshold) {
             score -= multiGame ? 35 : 15; // stronger bonus in multi-game to ensure everyone gets infield time
           }
+        }
+
+        // Position diversity: small bonus for positions rarely/never played this season
+        // Intentionally small — preferences and depth chart should dominate
+        if (seasonPositionCounts && seasonPositionCounts[playerName]) {
+          const posInnings = seasonPositionCounts[playerName][pos] || 0;
+          const totalInn = Object.values(seasonPositionCounts[playerName]).reduce((s, v) => s + v, 0);
+          if (totalInn > 0 && posInnings === 0) {
+            score -= 5; // small bonus for never-played positions
+          } else if (totalInn > 0 && posInnings / totalInn < 0.08) {
+            score -= 2; // tiny bonus for rarely-played positions
+          }
+        }
+
+        // Small attendance penalty: missing games slightly deprioritizes position assignments
+        const missed = (playerMissedGames && playerMissedGames[playerName]) || 0;
+        if (missed > 0) {
+          score += missed * 1.5;
         }
       }
 
@@ -2019,6 +2104,9 @@ function createHowToUseSheet(ss) {
     ['• Relief pitcher:', 'A suggested relief pitcher is shown per game in case the starter needs to come out'],
     ['• Rest P / Rest C:', 'Use these checkboxes on the Lineup Suggester to rest key players from P or C for specific games'],
     ['• Absent players:', 'Uncheck on Game Entry before saving — they are excluded from season history and don\'t affect recency scoring'],
+    ['• Weekly IP tracking:', 'The lineup output shows each pitcher\'s rolling 7-day innings pitched (prior + this game) for arm management'],
+    ['• Position diversity:', 'Small bonus nudges players toward positions they haven\'t played — preferences and depth chart always take priority'],
+    ['• Attendance equity:', 'Sit-out fairness uses per-game rate so missed games don\'t skew the rotation. Missing games applies a small position penalty'],
     ['• Tournament fairness:', 'Cross-game sit-out tracking ensures players who sit more in one game sit less in the next'],
     ['• Delete Last Game:', 'Use ⚾ Softball > Delete Last Game to undo the most recently saved game'],
     ['• Dashboard colors:', 'Yellow = 3+ games since, Red = 5+ games since playing a position'],

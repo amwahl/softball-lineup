@@ -75,6 +75,9 @@ A Google Apps Script tool for managing recreational softball lineups, fielding r
 - **Sit-out cap:** No player sits out more than their fair share — the cap is calculated as `ceil(total sit-out slots / players)`, so with 12 players and 5 innings, no one sits more than 2
 - Sit-outs rotate fairly — avoids consecutive sit-outs for the same player, and proactively sits out the next depth-chart pitcher to enable warmup
 - **Relief pitcher:** The output suggests a relief pitcher from the depth chart in case the starter needs to come out
+- **Weekly IP tracking:** The lineup output shows each pitcher's rolling 7-day innings pitched count (prior + this game)
+- **Position diversity:** Small bonus for positions a player has never or rarely played this season — preferences and depth chart rankings always take priority
+- **Attendance equity:** Sit-out fairness uses per-game rate (not raw count), so missed games don't skew the rotation. Missing a game applies a small position-assignment penalty as a tiebreaker
 - Recency is per-player — absent games don't inflate "games since last played"
 
 ### Rest Flags (P / C)
