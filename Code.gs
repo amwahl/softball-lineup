@@ -543,7 +543,8 @@ function computeBattingAverages() {
       playerStats[player] = {
         gameNums: new Set(), ab: 0, singles: 0, doubles: 0, triples: 0, hr: 0,
         bb: 0, sb: 0, cs: 0,
-        recentPositions: [] // [{gameNum, pos}] for stability calc
+        recentPositions: [], // [{gameNum, pos}] for stability calc
+        gameLogs: []         // [{gameNum, ab, singles, doubles, triples, hr, bb, sb, cs}]
       };
     }
 
@@ -563,6 +564,17 @@ function computeBattingAverages() {
     s.sb += data[i][9] || 0;
     s.cs += data[i][10] || 0;
     s.recentPositions.push({ gameNum: data[i][0], pos: data[i][11] || 0 });
+    s.gameLogs.push({
+      gameNum: data[i][0],
+      ab: data[i][3] || 0,
+      singles: data[i][4] || 0,
+      doubles: data[i][5] || 0,
+      triples: data[i][6] || 0,
+      hr: data[i][7] || 0,
+      bb: data[i][8] || 0,
+      sb: data[i][9] || 0,
+      cs: data[i][10] || 0
+    });
   }
 
   // Compute derived stats
@@ -576,6 +588,26 @@ function computeBattingAverages() {
     const obp = pa > 0 ? (hits + s.bb) / pa : 0;
     const slg = s.ab > 0 ? totalBases / s.ab : 0;
     const baserunning = (s.sb * 1.5) - (s.cs * 2); // SB bonus with CS penalty
+
+    const recentLogs = s.gameLogs.slice().sort((a, b) => b.gameNum - a.gameNum).slice(0, 7);
+    let recentAb = 0;
+    let recentHits = 0;
+    let recentBb = 0;
+    let recentSb = 0;
+    let recentCs = 0;
+    let recentTotalBases = 0;
+    for (const log of recentLogs) {
+      recentAb += log.ab;
+      recentHits += log.singles + log.doubles + log.triples + log.hr;
+      recentBb += log.bb;
+      recentSb += log.sb;
+      recentCs += log.cs;
+      recentTotalBases += log.singles + (log.doubles * 2) + (log.triples * 3) + (log.hr * 4);
+    }
+    const recentPa = recentAb + recentBb;
+    const recentObp = recentPa > 0 ? (recentHits + recentBb) / recentPa : obp;
+    const recentSlg = recentAb > 0 ? recentTotalBases / recentAb : slg;
+    const recentBaserunning = (recentSb * 1.5) - (recentCs * 2);
 
     // Average batting position over last 3 games for stability
     const sorted = s.recentPositions.slice().sort((a, b) => b.gameNum - a.gameNum);
@@ -593,7 +625,13 @@ function computeBattingAverages() {
       sb: s.sb,
       cs: s.cs,
       baserunning: baserunning,
-      avgBattingPos: avgPos
+      avgBattingPos: avgPos,
+      recentGames: recentLogs.length,
+      recentObp: recentObp,
+      recentSlg: recentSlg,
+      recentSb: recentSb,
+      recentCs: recentCs,
+      recentBaserunning: recentBaserunning
     };
   }
 
@@ -618,11 +656,12 @@ function getCoachingModeConfig(mode) {
         overallObp: 50,
         overallSlg: 50,
         overallBaserunning: 3,
+        recentWeight: 0.4,
         stabilityMaxMove: 2,
-        shuffleJitter: 0.16,
-        topScoreJitter: 6,
-        midScoreJitter: 6,
-        overallScoreJitter: 4
+        shuffleJitter: 0.14,
+        topScoreJitter: 5,
+        midScoreJitter: 5,
+        overallScoreJitter: 3
       },
       field: {
         preferredBonus: -20,
@@ -641,20 +680,21 @@ function getCoachingModeConfig(mode) {
     },
     Competitive: {
       name: 'Competitive',
-      description: 'Leans harder into best current fit, stronger depth-chart choices, and lineup stability.',
+      description: 'Leans hardest into current production and best-fit assignments for a win-now lineup.',
       batting: {
-        topObp: 115,
-        topBaserunning: 4,
-        midSlg: 130,
-        midObp: 25,
-        overallObp: 45,
-        overallSlg: 60,
-        overallBaserunning: 2,
-        stabilityMaxMove: 1,
-        shuffleJitter: 0.07,
-        topScoreJitter: 2,
-        midScoreJitter: 2,
-        overallScoreJitter: 1
+        topObp: 125,
+        topBaserunning: 3,
+        midSlg: 145,
+        midObp: 18,
+        overallObp: 42,
+        overallSlg: 68,
+        overallBaserunning: 1,
+        recentWeight: 0.55,
+        stabilityMaxMove: 3,
+        shuffleJitter: 0.05,
+        topScoreJitter: 1,
+        midScoreJitter: 1,
+        overallScoreJitter: 0.5
       },
       field: {
         preferredBonus: -24,
@@ -675,18 +715,19 @@ function getCoachingModeConfig(mode) {
       name: 'Development',
       description: 'Pushes harder for overdue reps, broader position variety, and long-term growth.',
       batting: {
-        topObp: 90,
-        topBaserunning: 6,
-        midSlg: 75,
-        midObp: 40,
-        overallObp: 47,
-        overallSlg: 38,
-        overallBaserunning: 5,
-        stabilityMaxMove: 3,
-        shuffleJitter: 0.24,
-        topScoreJitter: 10,
-        midScoreJitter: 10,
-        overallScoreJitter: 7
+        topObp: 82,
+        topBaserunning: 8,
+        midSlg: 65,
+        midObp: 45,
+        overallObp: 44,
+        overallSlg: 34,
+        overallBaserunning: 7,
+        recentWeight: 0.5,
+        stabilityMaxMove: 4,
+        shuffleJitter: 0.38,
+        topScoreJitter: 16,
+        midScoreJitter: 16,
+        overallScoreJitter: 12
       },
       field: {
         preferredBonus: -16,
@@ -718,6 +759,44 @@ function getDeterministicScoreJitter(playerName, contextKey, magnitude) {
   return (normalized * 2 - 1) * magnitude;
 }
 
+function getBlendedBattingProfile(stats, modeConfig) {
+  modeConfig = modeConfig || getCoachingModeConfig('Balanced');
+  const battingConfig = modeConfig.batting || {};
+  const seasonObp = stats && stats.obp ? stats.obp : 0;
+  const seasonSlg = stats && stats.slg ? stats.slg : 0;
+  const seasonBaserunning = stats && stats.baserunning ? stats.baserunning : 0;
+  const recentGames = stats && stats.recentGames ? stats.recentGames : 0;
+  const recentScale = Math.min(recentGames, 7) / 7;
+  const configuredRecentWeight = battingConfig.recentWeight || 0;
+  const recentWeight = configuredRecentWeight * recentScale;
+  const seasonWeight = 1 - recentWeight;
+  const recentObp = stats && stats.recentObp ? stats.recentObp : seasonObp;
+  const recentSlg = stats && stats.recentSlg ? stats.recentSlg : seasonSlg;
+  const recentBaserunning = stats && (stats.recentBaserunning || stats.recentBaserunning === 0)
+    ? stats.recentBaserunning
+    : seasonBaserunning;
+
+  return {
+    games: stats && stats.games ? stats.games : 0,
+    ab: stats && stats.ab ? stats.ab : 0,
+    hits: stats && stats.hits ? stats.hits : 0,
+    sb: stats && stats.sb ? stats.sb : 0,
+    cs: stats && stats.cs ? stats.cs : 0,
+    avgBattingPos: stats && stats.avgBattingPos ? stats.avgBattingPos : 0,
+    recentGames: recentGames,
+    recentWeight: recentWeight,
+    seasonObp: seasonObp,
+    seasonSlg: seasonSlg,
+    seasonBaserunning: seasonBaserunning,
+    recentObp: recentObp,
+    recentSlg: recentSlg,
+    recentBaserunning: recentBaserunning,
+    obp: (seasonObp * seasonWeight) + (recentObp * recentWeight),
+    slg: (seasonSlg * seasonWeight) + (recentSlg * recentWeight),
+    baserunning: (seasonBaserunning * seasonWeight) + (recentBaserunning * recentWeight)
+  };
+}
+
 function generateBattingOrder(availablePlayers, battingAverages, modeConfig) {
   modeConfig = modeConfig || getCoachingModeConfig('Balanced');
   const battingConfig = modeConfig.batting;
@@ -728,7 +807,7 @@ function generateBattingOrder(availablePlayers, battingAverages, modeConfig) {
   for (const player of availablePlayers) {
     const avg = battingAverages[player];
     if (avg && avg.games >= 3) {
-      withData.push({ name: player, stats: avg });
+      withData.push({ name: player, stats: getBlendedBattingProfile(avg, modeConfig) });
     } else {
       newPlayers.push(player);
     }
@@ -827,7 +906,7 @@ function generateBattingOrder(availablePlayers, battingAverages, modeConfig) {
     }
   }
 
-  // Stability: players move at most 2 spots from their average position over last 3 games
+  // Stability: recent batting slots still pull players toward familiar spots, with mode-based flexibility.
   for (let i = 0; i < order.length; i++) {
     if (!order[i]) continue;
     const avg = battingAverages[order[i].name];
@@ -876,7 +955,7 @@ function shuffleBattingOrderByTier(order, gameIndex, modeConfig) {
     return seed / 0x7fffffff; // 0-1
   }
 
-  // Add jitter to each player's position score: ±10% of lineup length
+  // Add mode-based jitter to each player's position score for deterministic variety.
   const jitterRange = Math.max(1, Math.round(order.length * modeConfig.batting.shuffleJitter));
   const jittered = order.map((entry, idx) => {
     const jitter = (nextRand() * 2 - 1) * jitterRange; // random between -jitterRange and +jitterRange
@@ -901,24 +980,28 @@ function getDepthChartRank(depthChart, pos, playerName) {
 }
 
 function buildBattingExplanation(entry, slot, battingAverages, modeConfig) {
-  const stats = battingAverages[entry.name] || {};
+  const seasonStats = battingAverages[entry.name] || {};
+  const stats = getBlendedBattingProfile(seasonStats, modeConfig);
   const bits = [];
+  if (stats.recentGames > 0 && stats.recentWeight >= 0.1) {
+    bits.push('recent 7-game form blended at ' + Math.round(stats.recentWeight * 100) + '%');
+  }
   if ((slot <= 3) && stats.obp > 0) {
-    bits.push('OBP ' + stats.obp.toFixed(3));
+    bits.push('blended OBP ' + stats.obp.toFixed(3));
     if (stats.sb > 0) bits.push('speed profile ' + stats.sb + ' SB');
     bits.push('fits top-of-order in ' + modeConfig.name.toLowerCase() + ' mode');
   } else if ((slot >= 4 && slot <= 6) && stats.slg > 0) {
-    bits.push('SLG ' + stats.slg.toFixed(3));
-    if (stats.obp > 0) bits.push('OBP ' + stats.obp.toFixed(3));
+    bits.push('blended SLG ' + stats.slg.toFixed(3));
+    if (stats.obp > 0) bits.push('blended OBP ' + stats.obp.toFixed(3));
     bits.push('profiles as a run producer');
   } else {
-    if (stats.games >= 3) {
-      bits.push('overall profile from ' + stats.games + ' tracked games');
+    if (seasonStats.games >= 3) {
+      bits.push('overall profile from ' + seasonStats.games + ' tracked games');
     } else {
       bits.push('limited batting sample, held near roster/default slot');
     }
-    if (stats.avgBattingPos > 0) {
-      bits.push('recent avg slot ' + stats.avgBattingPos.toFixed(1));
+    if (seasonStats.avgBattingPos > 0) {
+      bits.push('recent avg slot ' + seasonStats.avgBattingPos.toFixed(1));
     }
   }
   return entry.position + '. ' + entry.name + ' - ' + bits.join(', ');
@@ -2334,7 +2417,7 @@ function createHowToUseSheet(ss) {
     ['6. Click ⚾ Softball > Suggest Lineup', 'The algorithm generates field positions AND a batting order for each game'],
     ['7. Review the output', 'Sit-out cap, relief pitcher suggestion, and decision notes are shown per game below the lineup'],
     ['8. Edit if needed', 'Use dropdowns to make manual adjustments to field positions and sit-outs'],
-    ['9. Batting order section', 'Shows suggested batting order based on OBP, slugging, and speed stats'],
+    ['9. Batting order section', 'Shows a suggested batting order using season stats blended with the 7 most recent games'],
     ['10. Copy to Game Entry', 'Each game has its own labeled Field Lineup grid for easy copy-paste'],
     ['', ''],
     ['TOURNAMENT MODE (MULTI-GAME)', ''],
@@ -2344,15 +2427,16 @@ function createHowToUseSheet(ss) {
     ['3. What resets per game', 'No-return pitcher rule, 2-inning starter minimum, and position assignments all reset each game'],
     ['4. What carries across games', 'Sit-out fairness — players who sit more in game 1 sit less in game 2'],
     ['5. Infield rotation', 'The algorithm works harder to get everyone infield time across multiple games'],
-    ['6. Batting order variety', 'Order is shuffled slightly each game — players stay near their tier but not in the exact same spot'],
+    ['6. Batting order variety', 'Order is shuffled slightly each game — Development mode allows more movement among near-peer hitters'],
     ['7. Output format', 'Lineup cards, field lineups, and batting orders are stacked per game with color-coded titles (blue/green/yellow)'],
     ['8. Relief pitcher', 'Each game gets its own relief pitcher suggestion based on that game\'s available players'],
     ['', ''],
     ['UNDERSTANDING THE BATTING ORDER', ''],
-    ['Spots 1-3 (top of order):', 'Best OBP + speed — players who get on base and steal'],
-    ['Spots 4-6 (middle):', 'Best slugging — power hitters who drive in runs'],
+    ['Spots 1-3 (top of order):', 'Best blended OBP + speed — players who get on base and steal'],
+    ['Spots 4-6 (middle):', 'Best blended slugging — hitters who can drive in runs'],
     ['Spots 7+ (bottom):', 'Remaining players by overall composite score'],
-    ['Stability:', 'Players move at most 2 spots from their recent average position'],
+    ['Recent form blend:', 'Season stats are blended with the last 7 games, with Competitive and Development leaning more on recent form'],
+    ['Stability:', 'Recent batting slots still pull players toward familiar spots, but Development mode allows more movement'],
     ['New players (< 3 games):', 'Default to roster order until enough data is collected'],
     ['', ''],
     ['VIEWING THE DASHBOARD', ''],
