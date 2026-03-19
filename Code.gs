@@ -619,7 +619,10 @@ function getCoachingModeConfig(mode) {
         overallSlg: 50,
         overallBaserunning: 3,
         stabilityMaxMove: 2,
-        shuffleJitter: 0.1
+        shuffleJitter: 0.16,
+        topScoreJitter: 6,
+        midScoreJitter: 6,
+        overallScoreJitter: 4
       },
       field: {
         preferredBonus: -20,
@@ -648,7 +651,10 @@ function getCoachingModeConfig(mode) {
         overallSlg: 60,
         overallBaserunning: 2,
         stabilityMaxMove: 1,
-        shuffleJitter: 0.04
+        shuffleJitter: 0.07,
+        topScoreJitter: 2,
+        midScoreJitter: 2,
+        overallScoreJitter: 1
       },
       field: {
         preferredBonus: -24,
@@ -677,7 +683,10 @@ function getCoachingModeConfig(mode) {
         overallSlg: 38,
         overallBaserunning: 5,
         stabilityMaxMove: 3,
-        shuffleJitter: 0.16
+        shuffleJitter: 0.24,
+        topScoreJitter: 10,
+        midScoreJitter: 10,
+        overallScoreJitter: 7
       },
       field: {
         preferredBonus: -16,
@@ -696,6 +705,17 @@ function getCoachingModeConfig(mode) {
     }
   };
   return configs[selected];
+}
+
+function getDeterministicScoreJitter(playerName, contextKey, magnitude) {
+  if (!magnitude) return 0;
+  const input = String(playerName || '') + '|' + String(contextKey || '');
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash * 31) + input.charCodeAt(i)) & 0x7fffffff;
+  }
+  const normalized = (hash % 10000) / 9999; // 0..1
+  return (normalized * 2 - 1) * magnitude;
 }
 
 function generateBattingOrder(availablePlayers, battingAverages, modeConfig) {
@@ -729,17 +749,24 @@ function generateBattingOrder(availablePlayers, battingAverages, modeConfig) {
   // Top of order (1-3): OBP + baserunning (get on base and steal)
   // Middle (4-6): slugging (power hitters)
   // Bottom (7+): overall composite
-  const topScore = (s) => (s.obp * battingConfig.topObp) + (s.baserunning * battingConfig.topBaserunning);
-  const midScore = (s) => (s.slg * battingConfig.midSlg) + (s.obp * battingConfig.midObp);
-  const overallScore = (s) =>
+  const topScore = (name, s) =>
+    (s.obp * battingConfig.topObp) +
+    (s.baserunning * battingConfig.topBaserunning) +
+    getDeterministicScoreJitter(name, modeConfig.name + ':top', battingConfig.topScoreJitter);
+  const midScore = (name, s) =>
+    (s.slg * battingConfig.midSlg) +
+    (s.obp * battingConfig.midObp) +
+    getDeterministicScoreJitter(name, modeConfig.name + ':mid', battingConfig.midScoreJitter);
+  const overallScore = (name, s) =>
     (s.obp * battingConfig.overallObp) +
     (s.slg * battingConfig.overallSlg) +
-    (s.baserunning * battingConfig.overallBaserunning);
+    (s.baserunning * battingConfig.overallBaserunning) +
+    getDeterministicScoreJitter(name, modeConfig.name + ':overall', battingConfig.overallScoreJitter);
 
   // Sort for top of order
-  const topCandidates = withData.slice().sort((a, b) => topScore(b.stats) - topScore(a.stats));
+  const topCandidates = withData.slice().sort((a, b) => topScore(b.name, b.stats) - topScore(a.name, a.stats));
   // Sort for middle
-  const midCandidates = withData.slice().sort((a, b) => midScore(b.stats) - midScore(a.stats));
+  const midCandidates = withData.slice().sort((a, b) => midScore(b.name, b.stats) - midScore(a.name, a.stats));
 
   const totalSlots = availablePlayers.length;
   const topSlots = Math.min(3, totalSlots);
@@ -771,7 +798,7 @@ function generateBattingOrder(availablePlayers, battingAverages, modeConfig) {
 
   // Bottom: remaining with-data players by overall score
   const remaining = withData.filter(c => !assigned.has(c.name))
-    .sort((a, b) => overallScore(b.stats) - overallScore(a.stats));
+    .sort((a, b) => overallScore(b.name, b.stats) - overallScore(a.name, a.stats));
   slot = topSlots + midSlots;
   for (const c of remaining) {
     if (slot >= totalSlots) break;
