@@ -5,6 +5,7 @@
 const POSITIONS = ['P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF'];
 const MAX_PLAYERS = 12;
 const PREF_OPTIONS = ['Preferred', 'Okay', 'Restricted'];
+const COACHING_MODES = ['Balanced', 'Competitive', 'Development'];
 const BATTING_STATS = 'Batting Stats';
 const MAX_GAMES = 3;
 
@@ -603,7 +604,103 @@ function computeBattingAverages() {
 // BATTING ORDER ALGORITHM
 // ============================================================
 
-function generateBattingOrder(availablePlayers, battingAverages) {
+function getCoachingModeConfig(mode) {
+  const selected = COACHING_MODES.indexOf(mode) >= 0 ? mode : 'Balanced';
+  const configs = {
+    Balanced: {
+      name: 'Balanced',
+      description: 'Mixes best-fit positions with fair reps and steady development.',
+      batting: {
+        topObp: 100,
+        topBaserunning: 5,
+        midSlg: 100,
+        midObp: 30,
+        overallObp: 50,
+        overallSlg: 50,
+        overallBaserunning: 3,
+        stabilityMaxMove: 2,
+        shuffleJitter: 0.1
+      },
+      field: {
+        preferredBonus: -20,
+        depthWeight: 3,
+        recencyWeight: 5,
+        pitcherCatcherContinuityBonus: -50,
+        fieldSecondInningBonus: -10,
+        fieldThirdInningPenalty: 5,
+        fieldFourthPlusPenalty: 30,
+        outfieldOnlyBonus: 15,
+        outfieldOnlyBonusMulti: 35,
+        diversityNeverBonus: -5,
+        diversityRareBonus: -2,
+        missedGamePenalty: 1.5
+      }
+    },
+    Competitive: {
+      name: 'Competitive',
+      description: 'Leans harder into best current fit, stronger depth-chart choices, and lineup stability.',
+      batting: {
+        topObp: 115,
+        topBaserunning: 4,
+        midSlg: 130,
+        midObp: 25,
+        overallObp: 45,
+        overallSlg: 60,
+        overallBaserunning: 2,
+        stabilityMaxMove: 1,
+        shuffleJitter: 0.04
+      },
+      field: {
+        preferredBonus: -24,
+        depthWeight: 4.5,
+        recencyWeight: 2.5,
+        pitcherCatcherContinuityBonus: -65,
+        fieldSecondInningBonus: -14,
+        fieldThirdInningPenalty: 8,
+        fieldFourthPlusPenalty: 40,
+        outfieldOnlyBonus: 8,
+        outfieldOnlyBonusMulti: 18,
+        diversityNeverBonus: -1,
+        diversityRareBonus: 0,
+        missedGamePenalty: 0.5
+      }
+    },
+    Development: {
+      name: 'Development',
+      description: 'Pushes harder for overdue reps, broader position variety, and long-term growth.',
+      batting: {
+        topObp: 90,
+        topBaserunning: 6,
+        midSlg: 75,
+        midObp: 40,
+        overallObp: 47,
+        overallSlg: 38,
+        overallBaserunning: 5,
+        stabilityMaxMove: 3,
+        shuffleJitter: 0.16
+      },
+      field: {
+        preferredBonus: -16,
+        depthWeight: 2,
+        recencyWeight: 8,
+        pitcherCatcherContinuityBonus: -40,
+        fieldSecondInningBonus: -6,
+        fieldThirdInningPenalty: 2,
+        fieldFourthPlusPenalty: 18,
+        outfieldOnlyBonus: 24,
+        outfieldOnlyBonusMulti: 48,
+        diversityNeverBonus: -12,
+        diversityRareBonus: -6,
+        missedGamePenalty: 0.75
+      }
+    }
+  };
+  return configs[selected];
+}
+
+function generateBattingOrder(availablePlayers, battingAverages, modeConfig) {
+  modeConfig = modeConfig || getCoachingModeConfig('Balanced');
+  const battingConfig = modeConfig.batting;
   // Separate players with enough data from new players
   const withData = [];
   const newPlayers = [];
@@ -632,9 +729,12 @@ function generateBattingOrder(availablePlayers, battingAverages) {
   // Top of order (1-3): OBP + baserunning (get on base and steal)
   // Middle (4-6): slugging (power hitters)
   // Bottom (7+): overall composite
-  const topScore = (s) => (s.obp * 100) + (s.baserunning * 5);
-  const midScore = (s) => (s.slg * 100) + (s.obp * 30);
-  const overallScore = (s) => (s.obp * 50) + (s.slg * 50) + (s.baserunning * 3);
+  const topScore = (s) => (s.obp * battingConfig.topObp) + (s.baserunning * battingConfig.topBaserunning);
+  const midScore = (s) => (s.slg * battingConfig.midSlg) + (s.obp * battingConfig.midObp);
+  const overallScore = (s) =>
+    (s.obp * battingConfig.overallObp) +
+    (s.slg * battingConfig.overallSlg) +
+    (s.baserunning * battingConfig.overallBaserunning);
 
   // Sort for top of order
   const topCandidates = withData.slice().sort((a, b) => topScore(b.stats) - topScore(a.stats));
@@ -707,7 +807,7 @@ function generateBattingOrder(availablePlayers, battingAverages) {
     if (avg && avg.avgBattingPos > 0) {
       const targetPos = i + 1;
       const diff = Math.abs(targetPos - avg.avgBattingPos);
-      if (diff > 2) {
+      if (diff > battingConfig.stabilityMaxMove) {
         // Try to swap with someone closer to this player's avg position
         const idealSlot = Math.round(avg.avgBattingPos) - 1;
         const clampedSlot = Math.max(0, Math.min(order.length - 1, idealSlot));
@@ -740,7 +840,8 @@ function generateBattingOrder(availablePlayers, battingAverages) {
 // Shuffle batting order for variety across multi-game days.
 // Players stay roughly in their tier but can drift ~1 spot across tier boundaries.
 // Uses gameIndex as a seed for deterministic pseudo-random jitter.
-function shuffleBattingOrderByTier(order, gameIndex) {
+function shuffleBattingOrderByTier(order, gameIndex, modeConfig) {
+  modeConfig = modeConfig || getCoachingModeConfig('Balanced');
   // Seeded pseudo-random: simple LCG so same roster+gameIndex = same shuffle
   let seed = gameIndex * 2654435761; // large odd multiplier
   function nextRand() {
@@ -749,7 +850,7 @@ function shuffleBattingOrderByTier(order, gameIndex) {
   }
 
   // Add jitter to each player's position score: ±10% of lineup length
-  const jitterRange = Math.max(1, Math.round(order.length * 0.1));
+  const jitterRange = Math.max(1, Math.round(order.length * modeConfig.batting.shuffleJitter));
   const jittered = order.map((entry, idx) => {
     const jitter = (nextRand() * 2 - 1) * jitterRange; // random between -jitterRange and +jitterRange
     return { entry, sortKey: idx + jitter };
@@ -764,6 +865,111 @@ function shuffleBattingOrderByTier(order, gameIndex) {
     slg: item.entry.slg,
     sb: item.entry.sb
   }));
+}
+
+function getDepthChartRank(depthChart, pos, playerName) {
+  if (!depthChart || !depthChart[pos]) return 0;
+  const idx = depthChart[pos].indexOf(playerName);
+  return idx >= 0 ? idx + 1 : 0;
+}
+
+function buildBattingExplanation(entry, slot, battingAverages, modeConfig) {
+  const stats = battingAverages[entry.name] || {};
+  const bits = [];
+  if ((slot <= 3) && stats.obp > 0) {
+    bits.push('OBP ' + stats.obp.toFixed(3));
+    if (stats.sb > 0) bits.push('speed profile ' + stats.sb + ' SB');
+    bits.push('fits top-of-order in ' + modeConfig.name.toLowerCase() + ' mode');
+  } else if ((slot >= 4 && slot <= 6) && stats.slg > 0) {
+    bits.push('SLG ' + stats.slg.toFixed(3));
+    if (stats.obp > 0) bits.push('OBP ' + stats.obp.toFixed(3));
+    bits.push('profiles as a run producer');
+  } else {
+    if (stats.games >= 3) {
+      bits.push('overall profile from ' + stats.games + ' tracked games');
+    } else {
+      bits.push('limited batting sample, held near roster/default slot');
+    }
+    if (stats.avgBattingPos > 0) {
+      bits.push('recent avg slot ' + stats.avgBattingPos.toFixed(1));
+    }
+  }
+  return entry.position + '. ' + entry.name + ' - ' + bits.join(', ');
+}
+
+function buildPositionExplanation(playerName, pos, preferences, depthChart, gamesSinceAtPosition, seasonPositionCounts) {
+  const bits = [];
+  const pref = preferences[playerName] ? preferences[playerName][pos] : '';
+  if (pref === 'Preferred') bits.push('preferred there');
+  else if (pref === 'Okay') bits.push('playable fit there');
+
+  const rank = getDepthChartRank(depthChart, pos, playerName);
+  if (rank > 0) bits.push('#' + rank + ' on depth chart');
+
+  const since = gamesSinceAtPosition[playerName] ? gamesSinceAtPosition[playerName][pos] : 0;
+  if (since >= 3) bits.push(since + ' games since last ' + pos);
+
+  if (seasonPositionCounts && seasonPositionCounts[playerName]) {
+    const posCount = seasonPositionCounts[playerName][pos] || 0;
+    if (posCount === 0) bits.push('new season rep at ' + pos);
+    else if (posCount <= 2) bits.push('limited season reps at ' + pos);
+  }
+
+  return playerName + ' at ' + pos + ': ' + (bits.length > 0 ? bits.join(', ') : 'best available fit');
+}
+
+function buildGameDecisionTrace(lineup, sitOuts, battingOrder, modeConfig, preferences,
+    depthChart, gamesSinceAtPosition, seasonPositionCounts, sitOutCap, reliefPitcher, battingAverages) {
+  const notes = [];
+  notes.push('Mode: ' + modeConfig.name + ' - ' + modeConfig.description);
+
+  const firstInning = lineup[0] || [];
+  const anchorPositions = ['P', 'C', 'SS', 'CF'];
+  const anchorNotes = [];
+  anchorPositions.forEach(pos => {
+    const idx = POSITIONS.indexOf(pos);
+    if (idx < 0 || !firstInning[idx]) return;
+    anchorNotes.push(buildPositionExplanation(
+      firstInning[idx], pos, preferences, depthChart, gamesSinceAtPosition, seasonPositionCounts));
+  });
+  if (anchorNotes.length > 0) {
+    notes.push('Opening defense: ' + anchorNotes.join(' | '));
+  }
+
+  const topOrderNotes = battingOrder.slice(0, Math.min(3, battingOrder.length))
+    .map(entry => buildBattingExplanation(entry, entry.position, battingAverages, modeConfig));
+  if (topOrderNotes.length > 0) {
+    notes.push('Top of order: ' + topOrderNotes.join(' | '));
+  }
+
+  const middleOrderNotes = battingOrder.slice(3, Math.min(6, battingOrder.length))
+    .map(entry => buildBattingExplanation(entry, entry.position, battingAverages, modeConfig));
+  if (middleOrderNotes.length > 0) {
+    notes.push('Middle order: ' + middleOrderNotes.join(' | '));
+  }
+
+  const sitOutCounts = {};
+  sitOuts.forEach(group => {
+    group.forEach(name => {
+      sitOutCounts[name] = (sitOutCounts[name] || 0) + 1;
+    });
+  });
+  const sitOutLeaders = Object.keys(sitOutCounts)
+    .sort((a, b) => sitOutCounts[b] - sitOutCounts[a] || a.localeCompare(b))
+    .slice(0, 3)
+    .map(name => name + ' (' + sitOutCounts[name] + ')');
+  if (sitOutCap > 0) {
+    notes.push('Sit-out plan: cap ' + sitOutCap + ' per player' +
+      (sitOutLeaders.length > 0 ? '; highest this game: ' + sitOutLeaders.join(', ') : ''));
+  } else {
+    notes.push('Sit-out plan: everyone stays on the field each inning.');
+  }
+
+  if (reliefPitcher) {
+    notes.push('Relief pitcher: ' + reliefPitcher + ' is next in line from the depth chart if the starter needs to come out.');
+  }
+
+  return notes;
 }
 
 // ============================================================
@@ -1073,6 +1279,14 @@ function createLineupSuggesterSheet(ss) {
     .requireValueInList(gamesList, true).setAllowInvalid(false).build();
   sheet.getRange('D4').setDataValidation(gamesVal);
 
+  sheet.getRange('H4').setValue('Mode:').setFontWeight('bold');
+  sheet.getRange('I4').setValue('Balanced');
+  const modeVal = SpreadsheetApp.newDataValidation()
+    .requireValueInList(COACHING_MODES, true).setAllowInvalid(false).build();
+  sheet.getRange('I4').setDataValidation(modeVal);
+  sheet.getRange('J4').setValue('Balanced = mix fairness and fit; Competitive = best current lineup; Development = broaden reps')
+    .setFontColor('#666666').setFontStyle('italic');
+
   // Player availability: A=checkbox, B=name, C=Rest P, D=Rest C, E=G1, F=G2, G=G3
   // G1 is always checked for available players. G2/G3 hidden when Games=1.
   // Rest P / Rest C stay in the familiar C/D position from the old layout.
@@ -1186,6 +1400,8 @@ function suggestLineup() {
   }
 
   const games = Number(suggesterSheet.getRange('D4').getValue()) || 1;
+  const coachingMode = suggesterSheet.getRange('I4').getValue() || 'Balanced';
+  const modeConfig = getCoachingModeConfig(coachingMode);
 
   // Read player data: col A=master checkbox, B=name, C=Rest P, D=Rest C, E=G1, F=G2, G=G3
   const checkData = suggesterSheet.getRange(7, 1, MAX_PLAYERS, 2).getValues();
@@ -1399,6 +1615,7 @@ function suggestLineup() {
   const allGamesBatOrders = []; // [g] -> battingOrder[]
   const allGamesSitOutCaps = []; // [g] -> sitOutCap number
   const allGamesReliefPitchers = []; // [g] -> reliefPitcher name or null
+  const allGamesDecisionNotes = []; // [g] -> explanation strings[]
 
   for (let g = 0; g < games; g++) {
     const availablePlayers = perGameAvailable[g];
@@ -1480,7 +1697,9 @@ function suggestLineup() {
       sitOuts.push(sittingOut);
 
       const playing = availablePlayers.filter(p => sittingOut.indexOf(p) < 0);
-      const assignment = assignPositions(playing, preferences, gamesSinceAtPosition, lineup, inning, depthChart, games, seasonPositionCounts, playerMissedGames);
+      const assignment = assignPositions(
+        playing, preferences, gamesSinceAtPosition, lineup, inning,
+        depthChart, games, seasonPositionCounts, playerMissedGames, modeConfig);
       lineup.push(assignment);
 
       playing.forEach(p => inningCountThisGame[p]++);
@@ -1498,9 +1717,9 @@ function suggestLineup() {
     const sitOutCap = numSitOut > 0 ? Math.ceil(innings * numSitOut / availablePlayers.length) : 0;
 
     // Per-game batting order — shuffle within tiers for games 2+
-    let battingOrder = generateBattingOrder(availablePlayers, battingAverages);
+    let battingOrder = generateBattingOrder(availablePlayers, battingAverages, modeConfig);
     if (games > 1 && g > 0) {
-      battingOrder = shuffleBattingOrderByTier(battingOrder, g);
+      battingOrder = shuffleBattingOrderByTier(battingOrder, g, modeConfig);
     }
 
     // Per-game relief pitcher
@@ -1521,6 +1740,10 @@ function suggestLineup() {
     allGamesBatOrders.push(battingOrder);
     allGamesSitOutCaps.push(sitOutCap);
     allGamesReliefPitchers.push(reliefPitcher);
+    allGamesDecisionNotes.push(buildGameDecisionTrace(
+      lineup, sitOuts, battingOrder, modeConfig, preferences,
+      depthChart, gamesSinceAtPosition, seasonPositionCounts, sitOutCap, reliefPitcher, battingAverages
+    ));
   }
 
   // ── Output writing ──
@@ -1529,7 +1752,7 @@ function suggestLineup() {
   const gameTitleFontColors = ['white', 'white', '#333333'];
 
   // Calculate generous clear area: enough for MAX_GAMES stacked outputs
-  const maxCardRows = games * (MAX_PLAYERS + 6) + 5;
+  const maxCardRows = games * (MAX_PLAYERS + 13) + 5;
   const maxFieldRows = games * (11 + 3) + 5;
   const maxBattingRows = games * (MAX_PLAYERS + 3) + 5;
   const totalClearRows = maxCardRows + maxFieldRows + maxBattingRows + 10;
@@ -1552,6 +1775,7 @@ function suggestLineup() {
     const battingOrder = allGamesBatOrders[g];
     const sitOutCap = allGamesSitOutCaps[g];
     const reliefPitcher = allGamesReliefPitchers[g];
+    const decisionNotes = allGamesDecisionNotes[g];
     const availablePlayers = perGameAvailable[g];
     const numSitOut = availablePlayers.length - POSITIONS.length;
 
@@ -1662,6 +1886,18 @@ function suggestLineup() {
         .setFontStyle('italic');
       suggesterSheet.getRange(curRow, 1, 1, Math.max(6, cardHeaders.length)).mergeAcross();
       curRow++;
+    }
+
+    if (decisionNotes && decisionNotes.length > 0) {
+      suggesterSheet.getRange(curRow, 1).setValue('Decision Notes')
+        .setFontWeight('bold').setBackground('#e8f0fe');
+      suggesterSheet.getRange(curRow, 1, 1, Math.max(6, cardHeaders.length)).mergeAcross();
+      curRow++;
+      for (let i = 0; i < decisionNotes.length; i++) {
+        suggesterSheet.getRange(curRow, 1).setValue(decisionNotes[i]).setFontStyle('italic');
+        suggesterSheet.getRange(curRow, 1, 1, Math.max(6, cardHeaders.length)).mergeAcross();
+        curRow++;
+      }
     }
 
     curRow++; // gap between games
@@ -1780,15 +2016,18 @@ function suggestLineup() {
   const firstReliefPitcher = allGamesReliefPitchers.find(r => r);
   const reliefMsg = firstReliefPitcher ? '\nRelief pitcher: ' + firstReliefPitcher : '';
   ui.alert('Lineup Generated',
-    'A suggested lineup has been generated for ' + gameLabel + '.' +
+    'A ' + modeConfig.name.toLowerCase() + ' lineup has been generated for ' + gameLabel + '.' +
     reliefMsg +
-    '\n\nField positions and batting order are shown below.\n' +
+    '\n\nField positions, batting order, and decision notes are shown below.\n' +
     'You can manually edit any cell using the dropdowns.\n' +
     'Copy to the Game Entry sheet when ready.',
     ui.ButtonSet.OK);
 }
 
-function assignPositions(players, preferences, gamesSinceAtPosition, previousInnings, currentInning, depthChart, totalGames, seasonPositionCounts, playerMissedGames) {
+function assignPositions(players, preferences, gamesSinceAtPosition, previousInnings, currentInning,
+    depthChart, totalGames, seasonPositionCounts, playerMissedGames, modeConfig) {
+  modeConfig = modeConfig || getCoachingModeConfig('Balanced');
+  const fieldConfig = modeConfig.field;
   // Score each player-position combination
   const numPlayers = players.length;
   const numPositions = POSITIONS.length;
@@ -1851,10 +2090,10 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
         }
       }
 
-      // Skip all bonuses if already blocked (Restricted or no-return rule)
+        // Skip all bonuses if already blocked (Restricted or no-return rule)
       if (score < 10000) {
         if (pref === 'Preferred') {
-          score -= 20; // bonus for preferred
+          score += fieldConfig.preferredBonus; // bonus for preferred
         }
         // Okay = neutral (0)
 
@@ -1862,13 +2101,13 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
         if (depthChart && depthChart[pos]) {
           const rank = depthChart[pos].indexOf(playerName);
           if (rank >= 0) {
-            score -= (MAX_PLAYERS - rank) * 3; // 1st = -36, 2nd = -33, ..., 12th = -3
+            score -= (MAX_PLAYERS - rank) * fieldConfig.depthWeight;
           }
         }
 
         // Recency: prioritize positions not played recently
         const gamesSince = (gamesSinceAtPosition[playerName] && gamesSinceAtPosition[playerName][pos]) || 0;
-        score -= gamesSince * 5; // more games since = lower score = more priority
+        score -= gamesSince * fieldConfig.recencyWeight; // more games since = lower score = more priority
 
         // Position continuity: bonus for staying at same position
         if (currentInning > 0) {
@@ -1887,13 +2126,13 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
 
             // P and C get a much stronger continuity bonus since leaving is permanent
             if (j === 0 || j === 1) {
-              score -= 50; // P/C: strong incentive to keep pitcher/catcher in place
+              score += fieldConfig.pitcherCatcherContinuityBonus; // P/C: strong incentive to keep pitcher/catcher in place
             } else if (consecutiveCount >= 3) {
-              score += 30; // 4th+ consecutive inning at same field position: penalty to encourage rotation
+              score += fieldConfig.fieldFourthPlusPenalty; // 4th+ consecutive inning at same field position: penalty to encourage rotation
             } else if (consecutiveCount >= 2) {
-              score += 5; // 3rd consecutive inning: mild penalty to start encouraging moves
+              score += fieldConfig.fieldThirdInningPenalty; // 3rd consecutive inning: mild penalty to start encouraging moves
             } else {
-              score -= 10; // 2nd consecutive inning: small bonus for stability
+              score += fieldConfig.fieldSecondInningBonus; // 2nd consecutive inning: small bonus for stability
             }
           }
         }
@@ -1917,7 +2156,7 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
             }
           }
           if (allOutfield && inningsPlayed >= ofThreshold) {
-            score -= multiGame ? 35 : 15; // stronger bonus in multi-game to ensure everyone gets infield time
+            score -= multiGame ? fieldConfig.outfieldOnlyBonusMulti : fieldConfig.outfieldOnlyBonus;
           }
         }
 
@@ -1927,16 +2166,16 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
           const posInnings = seasonPositionCounts[playerName][pos] || 0;
           const totalInn = Object.values(seasonPositionCounts[playerName]).reduce((s, v) => s + v, 0);
           if (totalInn > 0 && posInnings === 0) {
-            score -= 5; // small bonus for never-played positions
+            score += fieldConfig.diversityNeverBonus; // small bonus for never-played positions
           } else if (totalInn > 0 && posInnings / totalInn < 0.08) {
-            score -= 2; // tiny bonus for rarely-played positions
+            score += fieldConfig.diversityRareBonus; // tiny bonus for rarely-played positions
           }
         }
 
         // Small attendance penalty: missing games slightly deprioritizes position assignments
         const missed = (playerMissedGames && playerMissedGames[playerName]) || 0;
         if (missed > 0) {
-          score += missed * 1.5;
+          score += missed * fieldConfig.missedGamePenalty;
         }
       }
 
@@ -2064,11 +2303,12 @@ function createHowToUseSheet(ss) {
     ['2. Rest P / Rest C columns', 'Check these to hold a player back from Pitcher or Catcher (great for friendlies or resting arms)'],
     ['3. Set the number of innings', ''],
     ['4. Set the number of games (1-3)', 'For single games leave at 1. For tournament days set to 2 or 3 (see Tournament Mode below)'],
-    ['5. Click ⚾ Softball > Suggest Lineup', 'The algorithm generates field positions AND a batting order for each game'],
-    ['6. Review the output', 'Sit-out cap and relief pitcher suggestion are shown per game below the lineup'],
-    ['7. Edit if needed', 'Use dropdowns to make manual adjustments to field positions and sit-outs'],
-    ['8. Batting order section', 'Shows suggested batting order based on OBP, slugging, and speed stats'],
-    ['9. Copy to Game Entry', 'Each game has its own labeled Field Lineup grid for easy copy-paste'],
+    ['5. Choose a coaching mode', 'Balanced mixes fairness and fit, Competitive leans into best current lineup, Development pushes broader reps'],
+    ['6. Click ⚾ Softball > Suggest Lineup', 'The algorithm generates field positions AND a batting order for each game'],
+    ['7. Review the output', 'Sit-out cap, relief pitcher suggestion, and decision notes are shown per game below the lineup'],
+    ['8. Edit if needed', 'Use dropdowns to make manual adjustments to field positions and sit-outs'],
+    ['9. Batting order section', 'Shows suggested batting order based on OBP, slugging, and speed stats'],
+    ['10. Copy to Game Entry', 'Each game has its own labeled Field Lineup grid for easy copy-paste'],
     ['', ''],
     ['TOURNAMENT MODE (MULTI-GAME)', ''],
     ['When to use:', 'Tournament days with 2-3 back-to-back games where you can\'t enter/save between games'],
@@ -2107,6 +2347,8 @@ function createHowToUseSheet(ss) {
     ['• Weekly IP tracking:', 'The lineup output shows each pitcher\'s rolling 7-day innings pitched (prior + this game) for arm management'],
     ['• Position diversity:', 'Small bonus nudges players toward positions they haven\'t played — preferences and depth chart always take priority'],
     ['• Attendance equity:', 'Sit-out fairness uses per-game rate so missed games don\'t skew the rotation. Missing games applies a small position penalty'],
+    ['• Coaching modes:', 'Balanced mixes fairness and fit, Competitive favors strongest current alignment, Development pushes overdue reps and position variety'],
+    ['• Decision notes:', 'Each suggested lineup includes a short explanation of the opening defense, batting-order logic, sit-outs, and relief pitcher choice'],
     ['• Tournament fairness:', 'Cross-game sit-out tracking ensures players who sit more in one game sit less in the next'],
     ['• Delete Last Game:', 'Use ⚾ Softball > Delete Last Game to undo the most recently saved game'],
     ['• Dashboard colors:', 'Yellow = 3+ games since, Red = 5+ games since playing a position'],
@@ -2122,13 +2364,13 @@ function createHowToUseSheet(ss) {
 
   // Bold column A for all rows (step numbers and bullets will be bold)
   sheet.getRange(1, 1, instructions.length, 1).setFontWeight('bold');
-  // Section header rows
-  const sectionRows = [3, 8, 13, 21, 25, 29, 35, 46, 57, 64, 70];
-  sectionRows.forEach(row => {
-    if (row <= instructions.length) {
-      sheet.getRange(row, 1, 1, 2).setFontSize(13).setBackground('#e8f0fe');
+  // Section header rows are the rows with text in column A and blank column B
+  for (let i = 0; i < instructions.length; i++) {
+    if (i === 0) continue;
+    if (instructions[i][0] && instructions[i][1] === '') {
+      sheet.getRange(i + 1, 1, 1, 2).setFontSize(13).setBackground('#e8f0fe');
     }
-  });
+  }
 }
 
 // ============================================================
