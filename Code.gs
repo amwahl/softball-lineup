@@ -30,6 +30,8 @@ function onOpen() {
     .addItem('Save Game', 'saveGame')
     .addItem('Delete Last Game', 'deleteLastGame')
     .addItem('Suggest Lineup', 'suggestLineup')
+    .addItem('Load Suggested Batting Order', 'loadSuggestedBattingOrderToGameEntry')
+    .addItem('Load Suggested Field Lineup', 'loadSuggestedFieldLineupToGameEntry')
     .addItem('Refresh Dashboard', 'refreshDashboard')
     .addToUi();
 }
@@ -201,7 +203,7 @@ function createGameEntrySheet(ss) {
   sheet.getRange(GE_STATS_START, 1).setValue('Batting Stats')
     .setFontSize(13).setFontWeight('bold').setBackground('#e8f0fe');
 
-  const statsHeaders = ['Player', 'AB', '1B', '2B', '3B', 'HR', 'BB', 'SB', 'CS'];
+  const statsHeaders = ['Bat Pos', 'Player', 'AB', '1B', '2B', '3B', 'HR', 'BB', 'SB', 'CS'];
   sheet.getRange(GE_STATS_START + 1, 1, 1, statsHeaders.length).setValues([statsHeaders])
     .setFontWeight('bold')
     .setBackground('#fbbc04')
@@ -209,19 +211,25 @@ function createGameEntrySheet(ss) {
     .setHorizontalAlignment('center');
 
   // Player rows for stats - use roster names from attendance section above
+  const statsPositions = [];
   const statsNames = [];
   const statsDefaults = [];
   for (let i = 0; i < MAX_PLAYERS; i++) {
+    statsPositions.push([i < players.length ? i + 1 : '']);
     statsNames.push([i < players.length ? players[i] : '']);
     statsDefaults.push([0, 0, 0, 0, 0, 0, 0, 0]);
   }
-  sheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 1).setValues(statsNames).setFontSize(11);
-  sheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 8).setValues(statsDefaults).setHorizontalAlignment('center');
+  sheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 1).setValues(statsPositions).setHorizontalAlignment('center');
+  sheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 1).setValues(statsNames).setFontSize(11);
+  sheet.getRange(GE_STATS_START + 2, 3, MAX_PLAYERS, 8).setValues(statsDefaults).setHorizontalAlignment('center');
 
   // Numeric validation for stat columns
   const numRule = SpreadsheetApp.newDataValidation()
     .requireNumberBetween(0, 99).setAllowInvalid(false).build();
-  sheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 8).setDataValidation(numRule);
+  sheet.getRange(GE_STATS_START + 2, 3, MAX_PLAYERS, 8).setDataValidation(numRule);
+  const battingPosRule = SpreadsheetApp.newDataValidation()
+    .requireNumberBetween(1, MAX_PLAYERS).setAllowInvalid(false).build();
+  sheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 1).setDataValidation(battingPosRule);
 
   sheet.setFrozenRows(3);
   updateGameEntryDropdowns();
@@ -256,11 +264,14 @@ function updateGameEntryDropdowns() {
   sheet.getRange(GE_ATTEND_DATA, 2, MAX_PLAYERS, 1).setValues(attendNameVals);
 
   // Update batting stats names
+  const posValues = [];
   const nameValues = [];
   for (let i = 0; i < MAX_PLAYERS; i++) {
+    posValues.push([i < players.length ? i + 1 : '']);
     nameValues.push([i < players.length ? players[i] : '']);
   }
-  sheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 1).setValues(nameValues);
+  sheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 1).setValues(posValues);
+  sheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 1).setValues(nameValues);
 }
 
 // ============================================================
@@ -369,6 +380,12 @@ function saveGame() {
     return;
   }
 
+  const battingOrderValidationErrors = validateGameEntryBattingOrder(gameSheet, players, absentPlayers);
+  if (battingOrderValidationErrors.length > 0) {
+    ui.alert('Batting Order Errors', battingOrderValidationErrors.join('\n'), ui.ButtonSet.OK);
+    return;
+  }
+
   for (let inning = 1; inning <= innings; inning++) {
     const inningData = gameData[inning - 1];
     for (let p = 0; p < players.length; p++) {
@@ -400,7 +417,7 @@ function saveGame() {
   }
 
   // Save batting stats
-  saveBattingStats(ss, gameSheet, gameNum, date, players);
+  saveBattingStats(ss, gameSheet, gameNum, date, players, absentPlayers);
 
   // Clear game entry for next use
   gameSheet.getRange('B1').clearContent();
@@ -413,7 +430,7 @@ function saveGame() {
   gameSheet.getRange(GE_ATTEND_DATA, 1, MAX_PLAYERS, 1).setValues(resetChecks);
 
   // Clear batting stats section
-  gameSheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 8).setValue(0);
+  resetGameEntryBattingSection(gameSheet);
 
   // Refresh dashboard
   refreshDashboard();
@@ -421,44 +438,344 @@ function saveGame() {
   ui.alert('Game Saved!', 'Game #' + gameNum + ' vs ' + opponent + ' has been saved.\nDashboard has been refreshed.', ui.ButtonSet.OK);
 }
 
-function saveBattingStats(ss, gameSheet, gameNum, date, players) {
+function saveBattingStats(ss, gameSheet, gameNum, date, players, absentPlayers) {
   const battingSheet = ss.getSheetByName(BATTING_STATS);
   if (!battingSheet) return;
 
-  // Batch read: player names (col 1) + stats (cols 2-9)
-  const statsData = gameSheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 9).getValues();
+  // Batch read: batting pos + player names + stats
+  const statsData = gameSheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 10).getValues();
 
   const battingRows = [];
   for (let i = 0; i < statsData.length; i++) {
-    const playerName = statsData[i][0];
+    const battingPos = Number(statsData[i][0]) || 0;
+    const playerName = (statsData[i][1] || '').toString().trim();
     if (!playerName || playerName.toString().trim() === '') continue;
+    if (absentPlayers && absentPlayers.has(playerName)) continue;
 
-    const ab = statsData[i][1] || 0;
-    // Only save rows where the player had at least 1 AB or BB
-    const bb = statsData[i][6] || 0;
-    if (ab === 0 && bb === 0) continue;
-
-    const battingPos = i + 1; // Default batting position = roster order
-    battingRows.push([
+    battingRows.push({
+      battingPos: battingPos,
+      row: [
       gameNum,
       date,
       playerName,
-      ab,              // AB
-      statsData[i][2] || 0, // 1B
-      statsData[i][3] || 0, // 2B
-      statsData[i][4] || 0, // 3B
-      statsData[i][5] || 0, // HR
-      bb,              // BB
-      statsData[i][7] || 0, // SB
-      statsData[i][8] || 0, // CS
+      statsData[i][2] || 0, // AB
+      statsData[i][3] || 0, // 1B
+      statsData[i][4] || 0, // 2B
+      statsData[i][5] || 0, // 3B
+      statsData[i][6] || 0, // HR
+      statsData[i][7] || 0, // BB
+      statsData[i][8] || 0, // SB
+      statsData[i][9] || 0, // CS
       battingPos
-    ]);
+      ]
+    });
+  }
+
+  battingRows.sort((a, b) => a.battingPos - b.battingPos || a.row[2].localeCompare(b.row[2]));
+  for (let i = 0; i < battingRows.length; i++) {
+    battingRows[i].row[11] = i + 1;
   }
 
   if (battingRows.length > 0) {
     const startRow = battingSheet.getLastRow() + 1;
-    battingSheet.getRange(startRow, 1, battingRows.length, battingRows[0].length).setValues(battingRows);
+    battingSheet.getRange(startRow, 1, battingRows.length, battingRows[0].row.length)
+      .setValues(battingRows.map(item => item.row));
   }
+}
+
+function validateGameEntryBattingOrder(gameSheet, players, absentPlayers) {
+  const errors = [];
+  const statsData = gameSheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 10).getValues();
+  const seenPlayers = new Set();
+  const seenPositions = new Set();
+  const activeRows = [];
+
+  for (let i = 0; i < statsData.length; i++) {
+    const battingPos = Number(statsData[i][0]) || 0;
+    const playerName = (statsData[i][1] || '').toString().trim();
+    if (!playerName) continue;
+    if (absentPlayers && absentPlayers.has(playerName)) continue;
+    activeRows.push({ battingPos, playerName });
+  }
+
+  for (let i = 0; i < activeRows.length; i++) {
+    const row = activeRows[i];
+    if (!row.battingPos) {
+      errors.push(row.playerName + ' is missing a batting position.');
+      continue;
+    }
+    if (seenPlayers.has(row.playerName)) {
+      errors.push(row.playerName + ' appears multiple times in the batting order.');
+    }
+    if (seenPositions.has(row.battingPos)) {
+      errors.push('Batting position ' + row.battingPos + ' is assigned more than once.');
+    }
+    seenPlayers.add(row.playerName);
+    seenPositions.add(row.battingPos);
+  }
+
+  if (errors.length === 0 && activeRows.length > 0) {
+    const expectedCount = activeRows.length;
+    for (let pos = 1; pos <= expectedCount; pos++) {
+      if (!seenPositions.has(pos)) {
+        errors.push('Batting positions must run 1 through ' + expectedCount + ' with no gaps.');
+        break;
+      }
+    }
+    if (errors.length === 0) {
+      for (const pos of seenPositions) {
+        if (pos > expectedCount) {
+          errors.push('Batting positions must run 1 through ' + expectedCount + ' with no gaps.');
+          break;
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+function resetGameEntryBattingSection(gameSheet) {
+  const players = getRosterNames();
+  const posValues = [];
+  const nameValues = [];
+  const statDefaults = [];
+  for (let i = 0; i < MAX_PLAYERS; i++) {
+    posValues.push([i < players.length ? i + 1 : '']);
+    nameValues.push([i < players.length ? players[i] : '']);
+    statDefaults.push([0, 0, 0, 0, 0, 0, 0, 0]);
+  }
+
+  gameSheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 1).setValues(posValues);
+  gameSheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 1).setValues(nameValues);
+  gameSheet.getRange(GE_STATS_START + 2, 3, MAX_PLAYERS, 8).setValues(statDefaults);
+}
+
+function loadSuggestedBattingOrderToGameEntry() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ui = SpreadsheetApp.getUi();
+  const suggesterSheet = ss.getSheetByName('Lineup Suggester');
+  const gameSheet = ss.getSheetByName('Game Entry');
+
+  if (!suggesterSheet || !gameSheet) {
+    ui.alert('Error', 'Lineup Suggester or Game Entry sheet not found.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const games = Number(suggesterSheet.getRange('D4').getValue()) || 1;
+  if (games !== 1) {
+    ui.alert('Single-Game Only', 'Load Suggested Batting Order currently supports single-game suggestions only.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const battingLabelCell = suggesterSheet.createTextFinder('Suggested Batting Order')
+    .matchEntireCell(true)
+    .findNext();
+  if (!battingLabelCell) {
+    ui.alert('No Suggested Batting Order', 'Generate a lineup first, then try loading the batting order.', ui.ButtonSet.OK);
+    return;
+  }
+  const battingHeaderRow = battingLabelCell.getRow() + 1;
+  const headerValues = suggesterSheet.getRange(battingHeaderRow, 1, 1, 5).getValues()[0];
+  if (headerValues[0] !== '#' || headerValues[1] !== 'Player') {
+    ui.alert('No Suggested Batting Order', 'Generate a lineup first, then try loading the batting order.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const battingData = suggesterSheet.getRange(battingHeaderRow + 1, 1, MAX_PLAYERS, 5).getValues();
+  const playerRows = [];
+  for (let i = 0; i < battingData.length; i++) {
+    const battingPos = Number(battingData[i][0]) || 0;
+    const playerName = (battingData[i][1] || '').toString().trim();
+    if (!battingPos || !playerName) continue;
+    playerRows.push([battingPos, playerName]);
+  }
+
+  if (playerRows.length === 0) {
+    ui.alert('No Suggested Batting Order', 'Generate a lineup first, then try loading the batting order.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const statValues = gameSheet.getRange(GE_STATS_START + 2, 3, MAX_PLAYERS, 8).getValues();
+  const statMap = {};
+  const existingNames = gameSheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 1).getValues();
+  for (let i = 0; i < MAX_PLAYERS; i++) {
+    const existingName = (existingNames[i][0] || '').toString().trim();
+    if (existingName) statMap[existingName] = statValues[i];
+  }
+
+  const posValues = [];
+  const nameValues = [];
+  const statsOutput = [];
+  for (let i = 0; i < MAX_PLAYERS; i++) {
+    if (i < playerRows.length) {
+      const battingPos = playerRows[i][0];
+      const playerName = playerRows[i][1];
+      posValues.push([battingPos]);
+      nameValues.push([playerName]);
+      statsOutput.push(statMap[playerName] || [0, 0, 0, 0, 0, 0, 0, 0]);
+    } else {
+      posValues.push(['']);
+      nameValues.push(['']);
+      statsOutput.push([0, 0, 0, 0, 0, 0, 0, 0]);
+    }
+  }
+
+  gameSheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 1).setValues(posValues);
+  gameSheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 1).setValues(nameValues);
+  gameSheet.getRange(GE_STATS_START + 2, 3, MAX_PLAYERS, 8).setValues(statsOutput);
+
+  gameSheet.activate();
+  ui.alert('Batting Order Loaded', 'The suggested batting order has been copied into Game Entry.', ui.ButtonSet.OK);
+}
+
+// ============================================================
+// LOAD SUGGESTED FIELD LINEUP (card → grid)
+// ============================================================
+
+// Reads the player card (player × innings) from Lineup Suggester,
+// pivots it into the inning × position grid, and writes it to Game Entry.
+// This lets coaches edit the card format (easier per-player reasoning)
+// and then load the result into Game Entry with one click.
+function loadSuggestedFieldLineupToGameEntry() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ui = SpreadsheetApp.getUi();
+  const suggesterSheet = ss.getSheetByName('Lineup Suggester');
+  const gameSheet = ss.getSheetByName('Game Entry');
+
+  if (!suggesterSheet || !gameSheet) {
+    ui.alert('Error', 'Lineup Suggester or Game Entry sheet not found.', ui.ButtonSet.OK);
+    return;
+  }
+
+  const games = Number(suggesterSheet.getRange('D4').getValue()) || 1;
+  if (games !== 1) {
+    ui.alert('Single-Game Only', 'Load Suggested Field Lineup currently supports single-game suggestions only.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Find the card header row by looking for "# Player Inn 1"
+  const headerFinder = suggesterSheet.createTextFinder('#')
+    .matchEntireCell(true);
+  let cardHeaderRow = 0;
+  let match = headerFinder.findNext();
+  while (match) {
+    const row = match.getRow();
+    const nextCell = suggesterSheet.getRange(row, 2).getValue();
+    if (nextCell === 'Player') {
+      cardHeaderRow = row;
+      break;
+    }
+    match = headerFinder.findNext();
+  }
+
+  if (!cardHeaderRow) {
+    ui.alert('No Suggested Lineup', 'Generate a lineup first (Suggest Lineup), then try loading.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Determine number of innings from card headers (cols after "# Player" before "OBP")
+  const headerRow = suggesterSheet.getRange(cardHeaderRow, 1, 1, 20).getValues()[0];
+  let innings = 0;
+  for (let i = 2; i < headerRow.length; i++) {
+    if (headerRow[i] && headerRow[i].toString().startsWith('Inn')) {
+      innings++;
+    } else {
+      break;
+    }
+  }
+
+  if (innings === 0) {
+    ui.alert('Error', 'Could not determine number of innings from card header.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Read card data: column 2 = player name, columns 3..3+innings-1 = positions per inning
+  const cardData = suggesterSheet.getRange(cardHeaderRow + 1, 2, MAX_PLAYERS, innings + 1).getValues();
+
+  // Parse card: build {playerName: [pos_inn1, pos_inn2, ...]}
+  const playerPositions = [];
+  for (let i = 0; i < cardData.length; i++) {
+    const name = (cardData[i][0] || '').toString().trim();
+    if (!name) continue;
+    const positions = [];
+    for (let inn = 0; inn < innings; inn++) {
+      positions.push((cardData[i][inn + 1] || '').toString().trim());
+    }
+    playerPositions.push({ name, positions });
+  }
+
+  if (playerPositions.length === 0) {
+    ui.alert('No Suggested Lineup', 'Generate a lineup first (Suggest Lineup), then try loading.', ui.ButtonSet.OK);
+    return;
+  }
+
+  // Pivot: for each inning, find who plays each position and who sits out
+  const gridData = [];
+  for (let inn = 0; inn < innings; inn++) {
+    const row = [inn + 1]; // inning number
+
+    // For each position, find the player assigned there
+    for (let p = 0; p < POSITIONS.length; p++) {
+      const pos = POSITIONS[p];
+      const player = playerPositions.find(pp => pp.positions[inn] === pos);
+      row.push(player ? player.name : '');
+    }
+
+    // Sit-outs
+    const sitOuts = playerPositions
+      .filter(pp => pp.positions[inn] === 'OUT')
+      .map(pp => pp.name);
+    for (let s = 0; s < GE_MAX_SIT_OUT; s++) {
+      row.push(s < sitOuts.length ? sitOuts[s] : '');
+    }
+
+    gridData.push(row);
+  }
+
+  // Write to Game Entry grid
+  const totalCols = 1 + POSITIONS.length + GE_MAX_SIT_OUT; // inning + 9 positions + 3 sit-outs
+  // Clear existing grid first
+  gameSheet.getRange(GE_GRID_DATA, 1, 9, totalCols).clearContent();
+  // Write new data
+  gameSheet.getRange(GE_GRID_DATA, 1, gridData.length, totalCols).setValues(gridData);
+
+  // Also load batting order — card row order IS the batting order
+  // Read the batting position numbers from column 1 of the card
+  const batNumData = suggesterSheet.getRange(cardHeaderRow + 1, 1, MAX_PLAYERS, 1).getValues();
+  const existingStats = gameSheet.getRange(GE_STATS_START + 2, 3, MAX_PLAYERS, 8).getValues();
+  const existingNames = gameSheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 1).getValues();
+  const statMap = {};
+  for (let i = 0; i < MAX_PLAYERS; i++) {
+    const existingName = (existingNames[i][0] || '').toString().trim();
+    if (existingName) statMap[existingName] = existingStats[i];
+  }
+
+  const posValues = [];
+  const nameValues = [];
+  const statsOutput = [];
+  for (let i = 0; i < MAX_PLAYERS; i++) {
+    if (i < playerPositions.length) {
+      const batPos = Number(batNumData[i][0]) || (i + 1);
+      const playerName = playerPositions[i].name;
+      posValues.push([batPos]);
+      nameValues.push([playerName]);
+      statsOutput.push(statMap[playerName] || [0, 0, 0, 0, 0, 0, 0, 0]);
+    } else {
+      posValues.push(['']);
+      nameValues.push(['']);
+      statsOutput.push([0, 0, 0, 0, 0, 0, 0, 0]);
+    }
+  }
+
+  gameSheet.getRange(GE_STATS_START + 2, 1, MAX_PLAYERS, 1).setValues(posValues);
+  gameSheet.getRange(GE_STATS_START + 2, 2, MAX_PLAYERS, 1).setValues(nameValues);
+  gameSheet.getRange(GE_STATS_START + 2, 3, MAX_PLAYERS, 8).setValues(statsOutput);
+
+  gameSheet.activate();
+  ui.alert('Lineup Loaded',
+    innings + '-inning field lineup and batting order have been loaded from the Lineup Suggester into Game Entry.',
+    ui.ButtonSet.OK);
 }
 
 // ============================================================
@@ -1789,7 +2106,18 @@ function suggestLineup() {
             nonConsecutive.push(c);
           }
         }
-        const ordered = nonConsecutive.concat(consecutive);
+
+        // HARD rule: never sit a player who sat the previous inning unless we have
+        // strictly fewer non-consecutive candidates than slots to fill.
+        let ordered;
+        if (nonConsecutive.length >= numSitOut) {
+          ordered = nonConsecutive;
+        } else {
+          ordered = nonConsecutive.concat(consecutive);
+          Logger.log('Game ' + (g + 1) + ' inning ' + (inning + 1) + ': only ' +
+            nonConsecutive.length + ' non-consecutive sit-out candidates for ' +
+            numSitOut + ' slots — falling back to consecutive sitters.');
+        }
 
         for (let s = 0; s < numSitOut && s < ordered.length; s++) {
           sittingOut.push(ordered[s]);
@@ -1798,7 +2126,10 @@ function suggestLineup() {
         if (nextPitcher && sittingOut.indexOf(nextPitcher) < 0) {
           const currentPitcher = inning > 0 ? lineup[inning - 1][0] : null;
           const nextPitcherSitOuts = inning - inningCountThisGame[nextPitcher];
-          if (nextPitcher !== currentPitcher && nextPitcherSitOuts < maxSitOutPerPlayer) {
+          const nextPitcherSatLast = lastSitOuts.indexOf(nextPitcher) >= 0;
+          // Don't swap in nextPitcher if they sat last inning — that would create a
+          // consecutive sit-out via the back door.
+          if (nextPitcher !== currentPitcher && nextPitcherSitOuts < maxSitOutPerPlayer && !nextPitcherSatLast) {
             sittingOut[sittingOut.length - 1] = nextPitcher;
           }
         }
@@ -2153,9 +2484,10 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
 
       let score = 0;
 
-      // Hard constraint: restricted = very high cost
+      // Hard constraint: Restricted is an absolute block — never assigned, even via fallback.
+      // Infinity is excluded from both bestPlayer and fallbackPlayer selection below.
       if (pref === 'Restricted') {
-        score = 10000;
+        score = Infinity;
       }
 
       // Bullpen warmup rule: prefer pitchers who sat out the previous inning
@@ -2191,12 +2523,21 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
         }
       }
 
-      // Minimum 2-inning starter rule for P and C:
-      // In inning 1 (second inning), heavily penalize changing the starter
-      if (score < 10000 && (j === 0 || j === 1) && currentInning === 1) {
-        const starterAtPos = previousInnings[0][j];
+      // Minimum 2-inning starter rule.
+      // P (pitcher): HARD block — the starting pitcher must pitch innings 1 and 2.
+      //   Soft +500 was overrideable by strong depth-chart bonuses, leaving the starter
+      //   pitching only one inning. Only enforced if the starter is still available.
+      // C (catcher): soft +500 (no-return rule for C is also soft, by design).
+      if (score < 10000 && j === 0 && currentInning === 1) {
+        const starterAtPos = previousInnings[0][0];
+        if (playerName !== starterAtPos && players.indexOf(starterAtPos) >= 0) {
+          score = Infinity; // hard block: starter must continue
+        }
+      }
+      if (score < 10000 && j === 1 && currentInning === 1) {
+        const starterAtPos = previousInnings[0][1];
         if (playerName !== starterAtPos) {
-          score += 500; // very strong penalty — keep the starter for at least 2 innings
+          score += 500;
         }
       }
 
@@ -2356,9 +2697,14 @@ function assignPositions(players, preferences, gamesSinceAtPosition, previousInn
       assignment[posIdx] = players[bestPlayer];
       assigned.add(bestPlayer);
     } else if (fallbackPlayer >= 0) {
-      // No unblocked player — assign the least-bad option to avoid a blank
+      // No unblocked player — assign the least-bad soft-blocked option (e.g., no-return P/C).
+      // Restricted players have score=Infinity and are excluded above.
       assignment[posIdx] = players[fallbackPlayer];
       assigned.add(fallbackPlayer);
+    } else {
+      // Every available player is Restricted at this position — leave blank.
+      Logger.log('No valid player for ' + POSITIONS[posIdx] + ' in inning ' + (currentInning + 1) +
+        ' — all available players have it marked Restricted.');
     }
   }
 
@@ -2391,8 +2737,9 @@ function createHowToUseSheet(ss) {
     ['2. Mark attendance', 'Uncheck absent players using the checkboxes in the left sidebar'],
     ['3. Fill in the lineup grid', 'Use dropdowns to assign one player per position per inning'],
     ['4. Mark who sat out', 'Use the Sit Out columns (up to 3 players can sit out per inning)'],
-    ['5. Enter batting stats (below lineup)', 'Fill in AB, hits (1B/2B/3B/HR), BB, SB, and CS for each player'],
-    ['6. Save the game', 'Click ⚾ Softball > Save Game — validates for errors before saving'],
+    ['5. Load or set the batting order', 'Use Bat Pos on Game Entry, or click ⚾ Softball > Load Suggested Batting Order after generating a single-game lineup'],
+    ['6. Enter batting stats (below lineup)', 'Fill in AB, hits (1B/2B/3B/HR), BB, SB, and CS for each player'],
+    ['7. Save the game', 'Click ⚾ Softball > Save Game — validates lineup and batting-order errors before saving'],
     ['', ''],                                              // 20
     ['SAVE GAME VALIDATION', ''],                          // 21
     ['The system checks before saving:', 'Duplicate players in one inning and absent players in the lineup are blocked'],
@@ -2418,7 +2765,8 @@ function createHowToUseSheet(ss) {
     ['7. Review the output', 'Sit-out cap, relief pitcher suggestion, and decision notes are shown per game below the lineup'],
     ['8. Edit if needed', 'Use dropdowns to make manual adjustments to field positions and sit-outs'],
     ['9. Batting order section', 'Shows a suggested batting order using season stats blended with the 7 most recent games'],
-    ['10. Copy to Game Entry', 'Each game has its own labeled Field Lineup grid for easy copy-paste'],
+    ['10. Load to Game Entry', 'For a single game, click ⚾ Softball > Load Suggested Batting Order to prefill Bat Pos + Player on Game Entry'],
+    ['11. Copy to Game Entry', 'Each game has its own labeled Field Lineup grid for easy copy-paste'],
     ['', ''],
     ['TOURNAMENT MODE (MULTI-GAME)', ''],
     ['When to use:', 'Tournament days with 2-3 back-to-back games where you can\'t enter/save between games'],
@@ -2464,8 +2812,8 @@ function createHowToUseSheet(ss) {
     ['• Delete Last Game:', 'Use ⚾ Softball > Delete Last Game to undo the most recently saved game'],
     ['• Dashboard colors:', 'Yellow = 3+ games since, Red = 5+ games since playing a position'],
     ['• Season History sheet:', 'Stores all game data — don\'t edit directly unless fixing errors'],
-    ['• Batting Stats sheet:', 'Stores per-game batting data — editable to fix errors, then Refresh Dashboard'],
-    ['• Updating the code:', 'Paste new Code.gs, save, then run rebuildGameEntry and initializeStep2 — your data is preserved'],
+    ['• Batting Stats sheet:', 'Stores per-game batting data with the saved batting position — editable to fix errors, then Refresh Dashboard'],
+    ['• Updating the code:', 'Paste new Code.gs, save, then run rebuildGameEntry when Game Entry changes and initializeStep2 when the suggester/help sheets change'],
   ];
 
   sheet.getRange(1, 1, instructions.length, 2).setValues(instructions);
